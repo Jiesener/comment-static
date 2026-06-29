@@ -21,6 +21,9 @@
             text-align: center;
         }
         h1 { color: #333; margin-bottom: 8px; font-size: 22px; }
+        .device-id {
+            font-size: 11px; color: #aaa; margin-bottom: 12px;
+        }
         .count-badge {
             display: inline-block; background: #667eea20; color: #667eea;
             font-size: 13px; padding: 4px 14px; border-radius: 20px;
@@ -74,8 +77,9 @@
 
     <div class="container">
         <h1>📋 评论展示</h1>
+        <div class="device-id" id="deviceIdDisplay"></div>
         <div class="count-badge">
-            📌 剩余 <strong id="remainingCount">0</strong> 条
+            📌 剩余 <strong id="remainingCount">0</strong> 条未分配
         </div>
         <div id="contentArea"></div>
         <div class="nav-links">
@@ -86,9 +90,22 @@
     <script>
         var API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
         var BIN_ID = '6a4270e3f5f4af5e2941a479';
-        var currentComments = [];  // 内存中当前显示的评论
-        var isOperating = false;   // 防止并发操作
+        var DEVICE_KEY = 'plzs_device_id';
 
+        // ========== 设备ID管理 ==========
+        function getDeviceId() {
+            var id = localStorage.getItem(DEVICE_KEY);
+            if (!id) {
+                id = 'device-' + Math.random().toString(36).substring(2, 10);
+                localStorage.setItem(DEVICE_KEY, id);
+            }
+            return id;
+        }
+
+        var myDeviceId = getDeviceId();
+        document.getElementById('deviceIdDisplay').textContent = '📱 设备: ' + myDeviceId;
+
+        // ========== 工具函数 ==========
         function showBadge(text, type) {
             var b = document.getElementById('syncBadge');
             b.textContent = text;
@@ -108,76 +125,121 @@
             return d.innerHTML;
         }
 
-        // 从云端读取最新数据
+        // ========== 云端操作 ==========
         function cloudLoad() {
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
                 headers: { 'X-Master-Key': API_KEY }
             }).then(function(r) { return r.json(); })
               .then(function(d) {
-                  if (d.record && d.record.comments) {
-                      return d.record.comments;
-                  }
-                  return [];
+                  if (d.record) return d.record;
+                  return { comments: [], assignments: {}, timestamp: 0 };
               }).catch(function() {
                   return null;
               });
         }
 
-        // 保存到云端
-        function cloudSave(arr) {
+        function cloudSave(data) {
+            data.timestamp = Date.now();
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
-                body: JSON.stringify({ comments: arr, timestamp: Date.now() })
+                body: JSON.stringify(data)
             }).then(function(r) { return r.json(); })
               .then(function() { return true; })
               .catch(function() { return false; });
         }
 
-        // 刷新显示
+        // ========== 核心逻辑 ==========
+        var cloudData = null;
+        var myComment = null;
+
         function render() {
             var area = document.getElementById('contentArea');
             var count = document.getElementById('remainingCount');
-            count.textContent = currentComments.length;
 
-            if (currentComments.length === 0) {
-                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>当前没有内容了</p><p style="font-size:14px">等待提交新内容...</p></div>';
+            if (cloudData) {
+                var unassigned = cloudData.comments.filter(function(c) {
+                    return !Object.values(cloudData.assignments).includes(c);
+                });
+                count.textContent = unassigned.length;
+            }
+
+            if (!myComment) {
+                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p><p style="font-size:14px">等待提交新内容...</p></div>';
             } else {
-                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(currentComments[0]) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
+                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(myComment) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
             }
         }
 
-        // 同步云端数据到本地
         function syncFromCloud() {
-            return cloudLoad().then(function(cloudComments) {
-                if (cloudComments !== null) {
-                    // 云端有数据，直接用云端的
-                    currentComments = cloudComments;
-                    render();
+            return cloudLoad().then(function(data) {
+                if (!data) return;
+                cloudData = data;
+
+                // 确保 assignments 和 comments 存在
+                if (!cloudData.assignments) cloudData.assignments = {};
+                if (!cloudData.comments) cloudData.comments = [];
+
+                // 检查当前设备是否已分配
+                var assigned = cloudData.assignments[myDeviceId];
+
+                if (assigned && cloudData.comments.indexOf(assigned) >= 0) {
+                    // 已分配且评论还存在
+                    myComment = assigned;
+                } else if (assigned) {
+                    // 已分配但评论不存在（被其他人删了），重新分配
+                    delete cloudData.assignments[myDeviceId];
+                    myComment = assignRandom();
+                } else {
+                    // 未分配，随机分配一条
+                    myComment = assignRandom();
                 }
+
+                render();
             });
         }
 
-        function doCopy() {
-            if (isOperating) return;
-            isOperating = true;
+        function assignRandom() {
+            // 找出未分配的评论
+            var assignedComments = Object.values(cloudData.assignments);
+            var unassigned = cloudData.comments.filter(function(c) {
+                return assignedComments.indexOf(c) < 0;
+            });
 
+            if (unassigned.length === 0) return null;
+
+            // 随机选一条
+            var randomIndex = Math.floor(Math.random() * unassigned.length);
+            var chosen = unassigned[randomIndex];
+
+            // 分配给当前设备
+            cloudData.assignments[myDeviceId] = chosen;
+            cloudSave(cloudData);
+
+            return chosen;
+        }
+
+        function doCopy() {
             var ta = document.getElementById('commentText');
-            if (!ta) { isOperating = false; return; }
+            if (!ta) return;
 
             var text = ta.value;
 
             function afterCopy() {
                 showToast('✅ 已复制！');
 
-                // 删除第一条，保存到云端
-                currentComments.shift();
-                cloudSave(currentComments).then(function() {
-                    render();
-                    isOperating = false;
-                }).catch(function() {
-                    render();
-                    isOperating = false;
+                // 从评论列表中删除
+                var idx = cloudData.comments.indexOf(text);
+                if (idx >= 0) {
+                    cloudData.comments.splice(idx, 1);
+                }
+                // 删除分配记录
+                delete cloudData.assignments[myDeviceId];
+                myComment = null;
+
+                cloudSave(cloudData).then(function() {
+                    // 重新分配一条新的
+                    syncFromCloud();
                 });
             }
 
@@ -191,17 +253,13 @@
         }
 
         function doSkip() {
-            if (isOperating) return;
-            isOperating = true;
+            // 删除分配记录，但不删除评论本身（让给别人）
+            delete cloudData.assignments[myDeviceId];
+            myComment = null;
 
-            currentComments.shift();
-            cloudSave(currentComments).then(function() {
-                render();
-                showToast('⏭ 已跳过');
-                isOperating = false;
-            }).catch(function() {
-                render();
-                isOperating = false;
+            cloudSave(cloudData).then(function() {
+                showToast('⏭ 已跳过，换一条');
+                syncFromCloud();
             });
         }
 
@@ -211,13 +269,13 @@
             showBadge('☁ 已同步', 'success');
         });
 
-        // 每 3 秒轮询云端，实现实时同步
+        // 每 5 秒轮询
         setInterval(function() {
             showBadge('🔄 同步中...', 'syncing');
             syncFromCloud().then(function() {
                 showBadge('☁ 已同步', 'success');
             });
-        }, 3000);
+        }, 5000);
     </script>
 </body>
 </html>
