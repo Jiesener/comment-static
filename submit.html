@@ -71,7 +71,7 @@
         <div class="message" id="message" style="display: none;"></div>
         <textarea id="commentsInput" placeholder="输入多条内容，每行一条&#10;例如：&#10;这条评论说的太对了&#10;支持！说的好" required></textarea>
         <div class="line-count" id="lineCount">0 行</div>
-        <div class="hint">💡 每行一条内容，提交后会<strong>替换</strong>云端所有旧内容</div>
+        <div class="hint">💡 每行一条内容，提交后会<strong>替换</strong>云端所有旧内容<br>提交后会清除所有设备的分配，每台设备将重新随机分配</div>
         <button type="button" id="submitBtn" onclick="doSubmit()">📤 提交内容</button>
         <div class="nav-links">
             <a href="index.html">← 去展示</a>
@@ -79,7 +79,6 @@
     </div>
 
     <script>
-        var STORAGE_KEY = 'plzs_comments';
         var API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
         var BIN_ID = '6a4270e3f5f4af5e2941a479';
 
@@ -101,20 +100,19 @@
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
                 headers: { 'X-Master-Key': API_KEY }
             }).then(function(r) { return r.json(); })
-              .then(function(d) { return d.record; })
-              .catch(function(e) { return null; });
+              .then(function(d) { return d.record || { comments: [], assignments: {} }; })
+              .catch(function() { return null; });
         }
 
-        function cloudSave(arr) {
+        function cloudSave(data) {
+            data.timestamp = Date.now();
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
-                body: JSON.stringify({ comments: arr, timestamp: Date.now() })
+                body: JSON.stringify(data)
             }).then(function(r) {
                 if (!r.ok) throw new Error('保存失败: ' + r.status);
                 return r.json();
-            }).then(function(d) {
-                return true;
             });
         }
 
@@ -135,9 +133,16 @@
             btn.textContent = '⏳ 正在保存到云端...';
             showBadge('☁ 保存中...', 'loading');
 
-            cloudSave(comments).then(function() {
+            // 保存新评论，清空所有分配
+            var newData = {
+                comments: comments,
+                assignments: {},  // 清空所有设备的分配，让它们重新随机获取
+                timestamp: Date.now()
+            };
+
+            cloudSave(newData).then(function() {
                 showBadge('☁ 已同步', 'success');
-                showMessage('✅ 成功提交 ' + comments.length + ' 条内容！（已保存到云端）', 'success');
+                showMessage('✅ 成功提交 ' + comments.length + ' 条内容！所有设备将重新随机分配', 'success');
                 document.getElementById('commentsInput').value = '';
                 document.getElementById('lineCount').textContent = '0 行';
                 updateCount();
@@ -145,7 +150,7 @@
                 btn.textContent = '📤 提交内容';
             }).catch(function(e) {
                 showBadge('☁ 保存失败', 'error');
-                showMessage('❌ 保存失败: ' + e.message + '，请重试', 'error');
+                showMessage('❌ 保存失败: ' + e.message, 'error');
                 btn.disabled = false;
                 btn.textContent = '📤 提交内容';
             });
@@ -155,8 +160,9 @@
             showBadge('☁ 读取中...', 'loading');
             cloudLoad().then(function(data) {
                 var count = (data && data.comments) ? data.comments.length : 0;
-                document.getElementById('currentCount').textContent = count;
-                showBadge('☁ 已同步 (' + count + '条)', 'success');
+                var assigned = data && data.assignments ? Object.keys(data.assignments).length : 0;
+                document.getElementById('currentCount').textContent = count + '条 (已分配' + assigned + '条)';
+                showBadge('☁ 已同步', 'success');
             });
         }
 
@@ -165,7 +171,6 @@
             document.getElementById('lineCount').textContent = lines + ' 行';
         });
 
-        // 初始化：只从云端读取当前数量，不覆盖本地输入
         updateCount();
     </script>
 </body>
