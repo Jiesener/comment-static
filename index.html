@@ -24,11 +24,7 @@
             width: 100%;
             text-align: center;
         }
-        h1 {
-            color: #333;
-            margin-bottom: 8px;
-            font-size: 22px;
-        }
+        h1 { color: #333; margin-bottom: 8px; font-size: 22px; }
         .count-badge {
             display: inline-block;
             background: #667eea20;
@@ -40,314 +36,230 @@
             font-weight: 600;
         }
         textarea {
-            width: 100%;
-            min-height: 120px;
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 12px;
-            font-size: 16px;
-            line-height: 1.6;
-            resize: none;
-            margin-bottom: 16px;
-            transition: border-color 0.2s;
-            font-family: inherit;
+            width: 100%; min-height: 120px; padding: 15px;
+            border: 2px solid #e0e0e0; border-radius: 12px;
+            font-size: 16px; line-height: 1.6; resize: none;
+            margin-bottom: 16px; font-family: inherit;
         }
-        textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .btn-group {
-            display: flex;
-            gap: 10px;
-        }
+        textarea:focus { outline: none; border-color: #667eea; }
+        .btn-group { display: flex; gap: 10px; }
         button {
-            flex: 1;
-            padding: 14px 20px;
+            flex: 1; padding: 14px 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.15s, opacity 0.15s;
-            -webkit-tap-highlight-color: transparent;
+            color: white; border: none; border-radius: 12px;
+            font-size: 16px; font-weight: 600; cursor: pointer;
         }
-        button:active {
-            transform: scale(0.97);
-        }
-        button.secondary {
-            background: #f0f0f0;
-            color: #666;
-            flex: 0.5;
-        }
-        .empty {
-            color: #999;
-            font-size: 16px;
-            padding: 50px 0;
-        }
+        button:active { transform: scale(0.97); }
+        button.secondary { background: #f0f0f0; color: #666; flex: 0.5; }
+        .empty { color: #999; font-size: 16px; padding: 50px 0; }
         .empty p { margin-top: 8px; font-size: 14px; }
         .toast {
-            position: fixed;
-            top: 20px;
-            left: 50%;
+            position: fixed; top: 20px; left: 50%;
             transform: translateX(-50%) translateY(-80px);
-            background: #27ae60;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 10px;
-            font-weight: 600;
-            font-size: 15px;
+            background: #27ae60; color: white;
+            padding: 12px 24px; border-radius: 10px;
+            font-weight: 600; font-size: 15px;
             box-shadow: 0 8px 30px rgba(0,0,0,0.2);
-            transition: transform 0.3s ease;
-            z-index: 999;
-            opacity: 0;
+            transition: transform 0.3s ease; z-index: 999; opacity: 0;
         }
-        .toast.show {
-            transform: translateX(-50%) translateY(0);
-            opacity: 1;
-        }
-        .nav-links {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        .nav-links a {
-            color: #888;
-            text-decoration: none;
-            font-size: 14px;
-            transition: color 0.2s;
-        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .nav-links { display: flex; justify-content: center; gap: 20px; margin-top: 20px; }
+        .nav-links a { color: #888; text-decoration: none; font-size: 14px; }
         .nav-links a:hover { color: #667eea; }
         .sync-badge {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 12px;
-            z-index: 1000;
+            position: fixed; bottom: 20px; right: 20px;
+            background: rgba(0,0,0,0.7); color: white;
+            padding: 8px 16px; border-radius: 20px; font-size: 12px; z-index: 1000;
         }
         .sync-badge.success { background: #27ae60; }
         .sync-badge.error { background: #e74c3c; }
         .sync-badge.loading { background: #f39c12; }
-        @media (max-width: 400px) {
-            .container { padding: 20px 16px; }
-            h1 { font-size: 20px; }
-            button { font-size: 15px; padding: 12px 16px; }
-            textarea { min-height: 100px; }
-        }
+        .debug { position: fixed; top: 10px; left: 10px; background: #000; color: #0f0; padding: 10px; font-size: 11px; z-index: 9999; max-width: 90vw; border-radius: 8px; white-space: pre-wrap; display: none; }
     </style>
 </head>
 <body>
     <div class="toast" id="toast"></div>
     <div class="sync-badge" id="syncBadge">☁ 同步中...</div>
+    <div class="debug" id="debug"></div>
 
     <div class="container">
         <h1>📋 复制评论</h1>
-        <div class="count-badge" id="countBadge">
+        <div class="count-badge">
             📌 剩余 <strong id="remainingCount">0</strong> 条
         </div>
-
-        <div id="contentArea">
-            <!-- 动态内容 -->
-        </div>
-
+        <div id="contentArea"></div>
         <div class="nav-links">
             <a href="submit.html">去提交内容 →</a>
         </div>
     </div>
 
     <script>
-        // ========== 配置 ==========
-        const STORAGE_KEY = 'plzs_comments';
-        const JSONBIN_API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
-        // 固定的 binId - 所有设备共用这个 ID，实现真正的多设备同步
-        const FIXED_BIN_ID = '6a4270e3f5f4af5e2941a479';
-        // ==========================
+        var STORAGE_KEY = 'plzs_comments';
+        var API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
+        var BIN_ID = '6a4270e3f5f4af5e2941a479';
+        var debugEl = document.getElementById('debug');
+        var debugMode = location.search.indexOf('debug') >= 0;
+        var logLines = [];
 
-        // ========== JSONBin 云同步 ==========
-        async function cloudLoad() {
-            try {
-                const response = await fetch(`https://api.jsonbin.io/v3/b/${FIXED_BIN_ID}/latest`, {
-                    headers: { 'X-Master-Key': JSONBIN_API_KEY }
-                });
-                if (!response.ok) throw new Error('加载失败');
-                const result = await response.json();
-                return result.record;
-            } catch (e) {
-                console.error('云加载失败:', e);
-                return null;
+        function log(msg) {
+            var line = new Date().toLocaleTimeString() + ' ' + msg;
+            logLines.push(line);
+            if (debugMode) {
+                debugEl.style.display = 'block';
+                debugEl.textContent = logLines.slice(-15).join('\n');
             }
+            console.log(line);
         }
 
-        async function cloudSave(data) {
-            try {
-                // 直接保存明文数据（不用加密，简单可靠）
-                await fetch(`https://api.jsonbin.io/v3/b/${FIXED_BIN_ID}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Master-Key': JSONBIN_API_KEY
-                    },
-                    body: JSON.stringify({ comments: data, timestamp: Date.now() })
-                });
-                return true;
-            } catch (e) {
-                console.error('云保存失败:', e);
-                return false;
-            }
-        }
-
-        // ========== 本地存储 ==========
-        function getComments() {
-            try {
-                const data = localStorage.getItem(STORAGE_KEY);
-                return data ? JSON.parse(data) : [];
-            } catch (e) {
-                return [];
-            }
-        }
-
-        function saveComments(comments) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(comments));
-        }
-
-        // ========== UI ==========
-        function showSyncBadge(text, type) {
-            const badge = document.getElementById('syncBadge');
-            badge.textContent = text;
-            badge.className = 'sync-badge ' + type;
+        function showBadge(text, type) {
+            var b = document.getElementById('syncBadge');
+            b.textContent = text;
+            b.className = 'sync-badge ' + type;
         }
 
         function showToast(text, isError) {
-            const toast = document.getElementById('toast');
-            toast.textContent = text;
-            toast.style.background = isError ? '#e74c3c' : '#27ae60';
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 1500);
+            var t = document.getElementById('toast');
+            t.textContent = text;
+            t.style.background = isError ? '#e74c3c' : '#27ae60';
+            t.classList.add('show');
+            setTimeout(function() { t.classList.remove('show'); }, 1500);
         }
 
-        async function copyComment() {
-            const textArea = document.getElementById('commentText');
-            if (!textArea) return;
-
-            const text = textArea.value;
-
-            const copyDone = async () => {
-                showToast('✅ 已复制！');
-                setTimeout(async () => {
-                    const comments = getComments();
-                    if (comments.length > 0) {
-                        comments.shift();
-                        saveComments(comments);
-                        await cloudSave(comments);
-                    }
-                    loadNext();
-                }, 600);
-            };
-
-            const copyFail = () => {
-                fallbackCopy(textArea, copyDone);
-            };
-
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(copyDone).catch(copyFail);
-            } else {
-                fallbackCopy(textArea, copyDone);
-            }
+        function getLocal() {
+            try {
+                var d = localStorage.getItem(STORAGE_KEY);
+                return d ? JSON.parse(d) : [];
+            } catch(e) { return []; }
         }
 
-        function fallbackCopy(textArea, onSuccess) {
-            textArea.select();
-            textArea.setSelectionRange(0, 99999);
-            if (document.execCommand('copy')) {
-                onSuccess();
-            } else {
-                alert('复制失败，请手动选中文字后复制');
-                textArea.select();
-            }
+        function saveLocal(arr) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
         }
 
-        async function skipComment() {
-            const comments = getComments();
-            if (comments.length > 0) {
-                comments.shift();
-                saveComments(comments);
-                await cloudSave(comments);
-            }
-            showToast('⏭ 已跳过', false);
-            setTimeout(() => loadNext(), 400);
+        // 从云端读取
+        function cloudLoad() {
+            log('开始从云端读取...');
+            return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
+                headers: { 'X-Master-Key': API_KEY }
+            }).then(function(r) {
+                log('云端响应: ' + r.status);
+                return r.json();
+            }).then(function(d) {
+                log('云端数据: ' + JSON.stringify(d.record).substring(0, 100));
+                return d.record;
+            }).catch(function(e) {
+                log('云端读取失败: ' + e.message);
+                return null;
+            });
         }
 
-        function loadNext() {
-            const comments = getComments();
-            const contentArea = document.getElementById('contentArea');
-            const remainingCount = document.getElementById('remainingCount');
-
-            remainingCount.textContent = comments.length;
-
-            if (comments.length === 0) {
-                contentArea.innerHTML = `
-                    <div class="empty">
-                        <div style="font-size: 48px; margin-bottom: 10px;">📭</div>
-                        <p>当前没有内容了</p>
-                        <p style="font-size: 14px;">去"提交内容"页面添加新内容</p>
-                    </div>
-                `;
-            } else {
-                contentArea.innerHTML = `
-                    <textarea id="commentText" readonly>${escapeHtml(comments[0])}</textarea>
-                    <div class="btn-group">
-                        <button onclick="copyComment()">📋 复制</button>
-                        <button class="secondary" onclick="skipComment()">⏭ 跳过</button>
-                    </div>
-                `;
-            }
+        // 保存到云端
+        function cloudSave(arr) {
+            log('开始保存到云端, 条数=' + arr.length);
+            return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Master-Key': API_KEY
+                },
+                body: JSON.stringify({ comments: arr, timestamp: Date.now() })
+            }).then(function(r) {
+                log('云端保存响应: ' + r.status);
+                return r.json();
+            }).then(function(d) {
+                log('云端保存成功');
+                return true;
+            }).catch(function(e) {
+                log('云端保存失败: ' + e.message);
+                return false;
+            });
         }
 
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            var d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
         }
 
-        // ========== 键盘快捷键 ==========
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' || e.key === ' ') {
-                if (e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
-                    e.preventDefault();
-                    copyComment();
-                }
-            }
-        });
+        function loadNext() {
+            var comments = getLocal();
+            var area = document.getElementById('contentArea');
+            var count = document.getElementById('remainingCount');
+            count.textContent = comments.length;
+            log('显示评论, 本地条数=' + comments.length);
 
-        // ========== 初始化 ==========
-        async function init() {
-            showSyncBadge('☁ 同步中...', 'loading');
-            
-            // 从云端加载数据
-            const cloud = await cloudLoad();
-            if (cloud && cloud.comments) {
-                // 云端有数据，用云端的（覆盖本地）
-                saveComments(cloud.comments);
+            if (comments.length === 0) {
+                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>当前没有内容了</p><p style="font-size:14px">去"提交内容"页面添加新内容</p></div>';
             } else {
-                // 云端没数据，把本地数据上传
-                const localData = getComments();
-                if (localData.length > 0) {
-                    await cloudSave(localData);
-                }
+                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(comments[0]) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
             }
-            
-            showSyncBadge('☁ 已同步', 'success');
-            loadNext();
         }
 
-        // 启动
-        init();
+        function doCopy() {
+            var ta = document.getElementById('commentText');
+            if (!ta) return;
+            var text = ta.value;
+
+            function afterCopy() {
+                showToast('✅ 已复制！');
+                setTimeout(function() {
+                    var comments = getLocal();
+                    if (comments.length > 0) {
+                        comments.shift();
+                        saveLocal(comments);
+                        cloudSave(comments).then(function() { loadNext(); });
+                    } else {
+                        loadNext();
+                    }
+                }, 500);
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(afterCopy).catch(function() {
+                    ta.select(); document.execCommand('copy'); afterCopy();
+                });
+            } else {
+                ta.select(); document.execCommand('copy'); afterCopy();
+            }
+        }
+
+        function doSkip() {
+            var comments = getLocal();
+            if (comments.length > 0) {
+                comments.shift();
+                saveLocal(comments);
+                cloudSave(comments).then(function() { loadNext(); });
+            }
+            showToast('⏭ 已跳过');
+        }
+
+        // 初始化
+        log('页面加载, 本地条数=' + getLocal().length);
+        showBadge('☁ 同步中...', 'loading');
+
+        cloudLoad().then(function(cloudData) {
+            if (cloudData && cloudData.comments && cloudData.comments.length > 0) {
+                var localData = getLocal();
+                log('云端=' + cloudData.comments.length + '条, 本地=' + localData.length + '条');
+
+                if (cloudData.comments.length >= localData.length) {
+                    log('用云端数据覆盖本地');
+                    saveLocal(cloudData.comments);
+                } else {
+                    log('本地数据更多, 上传到云端');
+                    cloudSave(localData);
+                }
+            } else {
+                log('云端没数据');
+                var localData = getLocal();
+                if (localData.length > 0) {
+                    log('上传本地数据到云端: ' + localData.length + '条');
+                    cloudSave(localData);
+                }
+            }
+            showBadge('☁ 已同步', 'success');
+            loadNext();
+        });
     </script>
 </body>
 </html>
