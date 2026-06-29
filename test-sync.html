@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head><title>同步测试</title></head>
+<body>
+<h1>JSONBin 同步测试</h1>
+<div id="result"></div>
+<script>
+const API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
+const BIN_ID = '6a4270e3f5f4af5e2941a479';
+const result = document.getElementById('result');
+
+async function test() {
+    result.innerHTML = '<h2>1. 测试读取</h2>';
+    try {
+        const r = await fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
+            headers: {'X-Master-Key': API_KEY}
+        });
+        const data = await r.json();
+        result.innerHTML += '<pre>读取成功: ' + JSON.stringify(data.record, null, 2) + '</pre>';
+    } catch(e) {
+        result.innerHTML += '<pre style="color:red">读取失败: ' + e.message + '</pre>';
+    }
+
+    result.innerHTML += '<h2>2. 测试写入</h2>';
+    try {
+        const r = await fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json', 'X-Master-Key': API_KEY},
+            body: JSON.stringify({comments: ['测试A', '测试B'], timestamp: Date.now()})
+        });
+        const data = await r.json();
+        result.innerHTML += '<pre>写入成功: ' + JSON.stringify(data.record, null, 2) + '</pre>';
+    } catch(e) {
+        result.innerHTML += '<pre style="color:red">写入失败: ' + e.message + '</pre>';
+    }
+
+    result.innerHTML += '<h2>3. 再次读取验证</h2>';
+    try {
+        const r = await fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
+            headers: {'X-Master-Key': API_KEY}
+        });
+        const data = await r.json();
+        result.innerHTML += '<pre>验证成功: ' + JSON.stringify(data.record, null, 2) + '</pre>';
+    } catch(e) {
+        result.innerHTML += '<pre style="color:red">验证失败: ' + e.message + '</pre>';
+    }
+}
+test();
+</script>
+</body>
+</html>
