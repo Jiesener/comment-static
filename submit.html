@@ -44,6 +44,7 @@
             font-size: 17px; font-weight: 600; cursor: pointer;
         }
         button:active { transform: scale(0.98); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
         .nav-links { display: flex; justify-content: center; gap: 20px; margin-top: 20px; }
         .nav-links a { color: #888; text-decoration: none; font-size: 14px; }
         .nav-links a:hover { color: #11998e; }
@@ -56,27 +57,24 @@
         .sync-badge.success { background: #27ae60; }
         .sync-badge.error { background: #e74c3c; }
         .sync-badge.loading { background: #f39c12; }
-        .debug { position: fixed; top: 10px; left: 10px; background: #000; color: #0f0; padding: 10px; font-size: 11px; z-index: 9999; max-width: 90vw; border-radius: 8px; white-space: pre-wrap; display: none; }
     </style>
 </head>
 <body>
-    <div class="sync-badge" id="syncBadge">☁ 同步中...</div>
-    <div class="debug" id="debug"></div>
+    <div class="sync-badge" id="syncBadge">☁ 准备中...</div>
 
     <div class="container">
         <h1>📝 提交内容</h1>
         <div class="status-bar">
-            <span class="status-item">📌 当前 <strong id="currentCount">0</strong> 条</span>
-            <span class="status-item">⚠️ 提交将替换所有旧内容</span>
+            <span class="status-item">📌 云端当前 <strong id="currentCount">0</strong> 条</span>
+            <span class="status-item">⚠️ 提交将<strong>替换</strong>所有旧内容</span>
         </div>
         <div class="message" id="message" style="display: none;"></div>
         <textarea id="commentsInput" placeholder="输入多条内容，每行一条&#10;例如：&#10;这条评论说的太对了&#10;支持！说的好" required></textarea>
         <div class="line-count" id="lineCount">0 行</div>
-        <div class="hint">💡 每行一条内容，提交后会<strong>替换</strong>所有旧内容</div>
+        <div class="hint">💡 每行一条内容，提交后会<strong>替换</strong>云端所有旧内容</div>
         <button type="button" id="submitBtn" onclick="doSubmit()">📤 提交内容</button>
         <div class="nav-links">
-            <a href="index.html">← 去复制</a>
-            <a href="#" onclick="clearInput()">🗑 清空</a>
+            <a href="index.html">← 去展示</a>
         </div>
     </div>
 
@@ -84,19 +82,6 @@
         var STORAGE_KEY = 'plzs_comments';
         var API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
         var BIN_ID = '6a4270e3f5f4af5e2941a479';
-        var debugEl = document.getElementById('debug');
-        var debugMode = location.search.indexOf('debug') >= 0;
-        var logLines = [];
-
-        function log(msg) {
-            var line = new Date().toLocaleTimeString() + ' ' + msg;
-            logLines.push(line);
-            if (debugMode) {
-                debugEl.style.display = 'block';
-                debugEl.textContent = logLines.slice(-15).join('\n');
-            }
-            console.log(line);
-        }
 
         function showBadge(text, type) {
             var b = document.getElementById('syncBadge');
@@ -109,22 +94,7 @@
             m.textContent = text;
             m.className = 'message ' + type;
             m.style.display = 'block';
-            setTimeout(function() { m.style.display = 'none'; }, 3000);
-        }
-
-        function getLocal() {
-            try {
-                var d = localStorage.getItem(STORAGE_KEY);
-                return d ? JSON.parse(d) : [];
-            } catch(e) { return []; }
-        }
-
-        function saveLocal(arr) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-        }
-
-        function updateCount() {
-            document.getElementById('currentCount').textContent = getLocal().length;
+            setTimeout(function() { m.style.display = 'none'; }, 5000);
         }
 
         function cloudLoad() {
@@ -132,24 +102,19 @@
                 headers: { 'X-Master-Key': API_KEY }
             }).then(function(r) { return r.json(); })
               .then(function(d) { return d.record; })
-              .catch(function(e) { log('读取失败: ' + e.message); return null; });
+              .catch(function(e) { return null; });
         }
 
         function cloudSave(arr) {
-            log('保存到云端, 条数=' + arr.length);
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
                 body: JSON.stringify({ comments: arr, timestamp: Date.now() })
             }).then(function(r) {
-                log('云端响应: ' + r.status);
+                if (!r.ok) throw new Error('保存失败: ' + r.status);
                 return r.json();
-            }).then(function() {
-                log('保存成功');
+            }).then(function(d) {
                 return true;
-            }).catch(function(e) {
-                log('保存失败: ' + e.message);
-                return false;
             });
         }
 
@@ -165,22 +130,34 @@
                 return;
             }
 
-            showBadge('☁ 同步中...', 'loading');
-            saveLocal(comments);
-            updateCount();
+            var btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ 正在保存到云端...';
+            showBadge('☁ 保存中...', 'loading');
 
             cloudSave(comments).then(function() {
                 showBadge('☁ 已同步', 'success');
-                showMessage('✅ 成功提交 ' + comments.length + ' 条内容！', 'success');
+                showMessage('✅ 成功提交 ' + comments.length + ' 条内容！（已保存到云端）', 'success');
                 document.getElementById('commentsInput').value = '';
                 document.getElementById('lineCount').textContent = '0 行';
+                updateCount();
+                btn.disabled = false;
+                btn.textContent = '📤 提交内容';
+            }).catch(function(e) {
+                showBadge('☁ 保存失败', 'error');
+                showMessage('❌ 保存失败: ' + e.message + '，请重试', 'error');
+                btn.disabled = false;
+                btn.textContent = '📤 提交内容';
             });
         }
 
-        function clearInput() {
-            if (document.getElementById('commentsInput').value && !confirm('确定清空？')) return;
-            document.getElementById('commentsInput').value = '';
-            document.getElementById('lineCount').textContent = '0 行';
+        function updateCount() {
+            showBadge('☁ 读取中...', 'loading');
+            cloudLoad().then(function(data) {
+                var count = (data && data.comments) ? data.comments.length : 0;
+                document.getElementById('currentCount').textContent = count;
+                showBadge('☁ 已同步 (' + count + '条)', 'success');
+            });
         }
 
         document.getElementById('commentsInput').addEventListener('input', function() {
@@ -188,21 +165,8 @@
             document.getElementById('lineCount').textContent = lines + ' 行';
         });
 
-        // 初始化
-        log('提交页面加载');
-        showBadge('☁ 同步中...', 'loading');
-
-        cloudLoad().then(function(cloudData) {
-            if (cloudData && cloudData.comments && cloudData.comments.length > 0) {
-                var localData = getLocal();
-                if (cloudData.comments.length >= localData.length) {
-                    saveLocal(cloudData.comments);
-                    log('用云端数据: ' + cloudData.comments.length + '条');
-                }
-            }
-            showBadge('☁ 已同步', 'success');
-            updateCount();
-        });
+        // 初始化：只从云端读取当前数量，不覆盖本地输入
+        updateCount();
     </script>
 </body>
 </html>
