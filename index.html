@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>复制评论 - 评论助手</title>
+    <title>评论展示 - 评论助手</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -16,24 +16,15 @@
             padding: 16px;
         }
         .container {
-            background: white;
-            padding: 30px 24px;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 500px;
-            width: 100%;
+            background: white; padding: 30px 24px; border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 500px; width: 100%;
             text-align: center;
         }
         h1 { color: #333; margin-bottom: 8px; font-size: 22px; }
         .count-badge {
-            display: inline-block;
-            background: #667eea20;
-            color: #667eea;
-            font-size: 13px;
-            padding: 4px 14px;
-            border-radius: 20px;
-            margin-bottom: 20px;
-            font-weight: 600;
+            display: inline-block; background: #667eea20; color: #667eea;
+            font-size: 13px; padding: 4px 14px; border-radius: 20px;
+            margin-bottom: 20px; font-weight: 600;
         }
         textarea {
             width: 100%; min-height: 120px; padding: 15px;
@@ -56,9 +47,8 @@
         .toast {
             position: fixed; top: 20px; left: 50%;
             transform: translateX(-50%) translateY(-80px);
-            background: #27ae60; color: white;
-            padding: 12px 24px; border-radius: 10px;
-            font-weight: 600; font-size: 15px;
+            background: #27ae60; color: white; padding: 12px 24px;
+            border-radius: 10px; font-weight: 600; font-size: 15px;
             box-shadow: 0 8px 30px rgba(0,0,0,0.2);
             transition: transform 0.3s ease; z-index: 999; opacity: 0;
         }
@@ -74,13 +64,13 @@
         .sync-badge.success { background: #27ae60; }
         .sync-badge.error { background: #e74c3c; }
         .sync-badge.loading { background: #f39c12; }
-        .debug { position: fixed; top: 10px; left: 10px; background: #000; color: #0f0; padding: 10px; font-size: 11px; z-index: 9999; max-width: 90vw; border-radius: 8px; white-space: pre-wrap; display: none; }
+        .sync-badge.syncing { background: #3498db; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
     </style>
 </head>
 <body>
     <div class="toast" id="toast"></div>
     <div class="sync-badge" id="syncBadge">☁ 同步中...</div>
-    <div class="debug" id="debug"></div>
 
     <div class="container">
         <h1>📋 评论展示</h1>
@@ -97,19 +87,8 @@
         var STORAGE_KEY = 'plzs_comments';
         var API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
         var BIN_ID = '6a4270e3f5f4af5e2941a479';
-        var debugEl = document.getElementById('debug');
-        var debugMode = location.search.indexOf('debug') >= 0;
-        var logLines = [];
-
-        function log(msg) {
-            var line = new Date().toLocaleTimeString() + ' ' + msg;
-            logLines.push(line);
-            if (debugMode) {
-                debugEl.style.display = 'block';
-                debugEl.textContent = logLines.slice(-15).join('\n');
-            }
-            console.log(line);
-        }
+        var lastCloudTimestamp = 0;  // 记录上次云端数据的时间戳
+        var isSyncing = false;  // 防止并发同步
 
         function showBadge(text, type) {
             var b = document.getElementById('syncBadge');
@@ -117,10 +96,9 @@
             b.className = 'sync-badge ' + type;
         }
 
-        function showToast(text, isError) {
+        function showToast(text) {
             var t = document.getElementById('toast');
             t.textContent = text;
-            t.style.background = isError ? '#e74c3c' : '#27ae60';
             t.classList.add('show');
             setTimeout(function() { t.classList.remove('show'); }, 1500);
         }
@@ -136,26 +114,21 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
         }
 
-        // 从云端读取
+        // 从云端读取（每次都读最新的）
         function cloudLoad() {
-            log('开始从云端读取...');
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
                 headers: { 'X-Master-Key': API_KEY }
             }).then(function(r) {
-                log('云端响应: ' + r.status);
                 return r.json();
             }).then(function(d) {
-                log('云端数据: ' + JSON.stringify(d.record).substring(0, 100));
                 return d.record;
             }).catch(function(e) {
-                log('云端读取失败: ' + e.message);
                 return null;
             });
         }
 
         // 保存到云端
         function cloudSave(arr) {
-            log('开始保存到云端, 条数=' + arr.length);
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
                 method: 'PUT',
                 headers: {
@@ -164,13 +137,11 @@
                 },
                 body: JSON.stringify({ comments: arr, timestamp: Date.now() })
             }).then(function(r) {
-                log('云端保存响应: ' + r.status);
                 return r.json();
             }).then(function(d) {
-                log('云端保存成功');
+                lastCloudTimestamp = d.record ? d.record.timestamp : Date.now();
                 return true;
-            }).catch(function(e) {
-                log('云端保存失败: ' + e.message);
+            }).catch(function() {
                 return false;
             });
         }
@@ -186,13 +157,37 @@
             var area = document.getElementById('contentArea');
             var count = document.getElementById('remainingCount');
             count.textContent = comments.length;
-            log('显示评论, 本地条数=' + comments.length);
 
             if (comments.length === 0) {
-                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>当前没有内容了</p><p style="font-size:14px">去"提交内容"页面添加新内容</p></div>';
+                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>当前没有内容了</p><p style="font-size:14px">等待其他人提交新内容...</p></div>';
             } else {
                 area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(comments[0]) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
             }
+        }
+
+        // 从云端同步到本地（核心逻辑）
+        function syncFromCloud() {
+            if (isSyncing) return;
+            isSyncing = true;
+
+            cloudLoad().then(function(cloudData) {
+                if (cloudData && cloudData.comments) {
+                    var cloudTs = cloudData.timestamp || 0;
+                    var localData = getLocal();
+
+                    // 云端有更新，或者本地为空，用云端数据
+                    if (cloudTs > lastCloudTimestamp || localData.length === 0) {
+                        if (JSON.stringify(cloudData.comments) !== JSON.stringify(localData)) {
+                            saveLocal(cloudData.comments);
+                            loadNext();
+                        }
+                        lastCloudTimestamp = cloudTs;
+                    }
+                }
+                isSyncing = false;
+            }).catch(function() {
+                isSyncing = false;
+            });
         }
 
         function doCopy() {
@@ -202,16 +197,16 @@
 
             function afterCopy() {
                 showToast('✅ 已复制！');
-                setTimeout(function() {
-                    var comments = getLocal();
-                    if (comments.length > 0) {
-                        comments.shift();
-                        saveLocal(comments);
-                        cloudSave(comments).then(function() { loadNext(); });
-                    } else {
+                var comments = getLocal();
+                if (comments.length > 0) {
+                    comments.shift();
+                    saveLocal(comments);
+                    cloudSave(comments).then(function() {
                         loadNext();
-                    }
-                }, 500);
+                    });
+                } else {
+                    loadNext();
+                }
             }
 
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -228,38 +223,30 @@
             if (comments.length > 0) {
                 comments.shift();
                 saveLocal(comments);
-                cloudSave(comments).then(function() { loadNext(); });
+                cloudSave(comments).then(function() {
+                    loadNext();
+                });
             }
             showToast('⏭ 已跳过');
         }
 
-        // 初始化
-        log('页面加载, 本地条数=' + getLocal().length);
+        // ========== 初始化 + 轮询 ==========
+        // 首次加载
         showBadge('☁ 同步中...', 'loading');
+        syncFromCloud();
 
-        cloudLoad().then(function(cloudData) {
-            if (cloudData && cloudData.comments && cloudData.comments.length > 0) {
-                var localData = getLocal();
-                log('云端=' + cloudData.comments.length + '条, 本地=' + localData.length + '条');
+        // 每3秒轮询一次云端，实现多设备实时同步
+        setInterval(function() {
+            showBadge('🔄 同步中...', 'syncing');
+            syncFromCloud().then(function() {
+                showBadge('☁ 已同步', 'success');
+            });
+        }, 3000);
 
-                if (cloudData.comments.length >= localData.length) {
-                    log('用云端数据覆盖本地');
-                    saveLocal(cloudData.comments);
-                } else {
-                    log('本地数据更多, 上传到云端');
-                    cloudSave(localData);
-                }
-            } else {
-                log('云端没数据');
-                var localData = getLocal();
-                if (localData.length > 0) {
-                    log('上传本地数据到云端: ' + localData.length + '条');
-                    cloudSave(localData);
-                }
-            }
+        // 初始化完成后显示同步状态
+        setTimeout(function() {
             showBadge('☁ 已同步', 'success');
-            loadNext();
-        });
+        }, 2000);
     </script>
 </body>
 </html>
