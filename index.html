@@ -299,11 +299,11 @@
                 delete cloudData.assignments[myDeviceId];
                 myComment = null;
 
+                // 保存到云端，然后分配下一条
                 cloudSave(cloudData).then(function() {
                     initAssignment().then(function() {
                         isOperating = false;
                     });
-                    isOperating = false;
                 });
             }
 
