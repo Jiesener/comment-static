@@ -65,7 +65,7 @@
         .sync-badge.error { background: #e74c3c; }
         .sync-badge.loading { background: #f39c12; }
         .sync-badge.syncing { background: #3498db; animation: pulse 1s infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
     </style>
 </head>
 <body>
@@ -84,11 +84,10 @@
     </div>
 
     <script>
-        var STORAGE_KEY = 'plzs_comments';
         var API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
         var BIN_ID = '6a4270e3f5f4af5e2941a479';
-        var lastCloudTimestamp = 0;  // 记录上次云端数据的时间戳
-        var isSyncing = false;  // 防止并发同步
+        var currentComments = [];  // 内存中当前显示的评论
+        var isOperating = false;   // 防止并发操作
 
         function showBadge(text, type) {
             var b = document.getElementById('syncBadge');
@@ -103,110 +102,83 @@
             setTimeout(function() { t.classList.remove('show'); }, 1500);
         }
 
-        function getLocal() {
-            try {
-                var d = localStorage.getItem(STORAGE_KEY);
-                return d ? JSON.parse(d) : [];
-            } catch(e) { return []; }
-        }
-
-        function saveLocal(arr) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-        }
-
-        // 从云端读取（每次都读最新的）
-        function cloudLoad() {
-            return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
-                headers: { 'X-Master-Key': API_KEY }
-            }).then(function(r) {
-                return r.json();
-            }).then(function(d) {
-                return d.record;
-            }).catch(function(e) {
-                return null;
-            });
-        }
-
-        // 保存到云端
-        function cloudSave(arr) {
-            return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Master-Key': API_KEY
-                },
-                body: JSON.stringify({ comments: arr, timestamp: Date.now() })
-            }).then(function(r) {
-                return r.json();
-            }).then(function(d) {
-                lastCloudTimestamp = d.record ? d.record.timestamp : Date.now();
-                return true;
-            }).catch(function() {
-                return false;
-            });
-        }
-
         function escapeHtml(text) {
             var d = document.createElement('div');
             d.textContent = text;
             return d.innerHTML;
         }
 
-        function loadNext() {
-            var comments = getLocal();
+        // 从云端读取最新数据
+        function cloudLoad() {
+            return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
+                headers: { 'X-Master-Key': API_KEY }
+            }).then(function(r) { return r.json(); })
+              .then(function(d) {
+                  if (d.record && d.record.comments) {
+                      return d.record.comments;
+                  }
+                  return [];
+              }).catch(function() {
+                  return null;
+              });
+        }
+
+        // 保存到云端
+        function cloudSave(arr) {
+            return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
+                body: JSON.stringify({ comments: arr, timestamp: Date.now() })
+            }).then(function(r) { return r.json(); })
+              .then(function() { return true; })
+              .catch(function() { return false; });
+        }
+
+        // 刷新显示
+        function render() {
             var area = document.getElementById('contentArea');
             var count = document.getElementById('remainingCount');
-            count.textContent = comments.length;
+            count.textContent = currentComments.length;
 
-            if (comments.length === 0) {
-                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>当前没有内容了</p><p style="font-size:14px">等待其他人提交新内容...</p></div>';
+            if (currentComments.length === 0) {
+                area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>当前没有内容了</p><p style="font-size:14px">等待提交新内容...</p></div>';
             } else {
-                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(comments[0]) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
+                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(currentComments[0]) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
             }
         }
 
-        // 从云端同步到本地（核心逻辑）
+        // 同步云端数据到本地
         function syncFromCloud() {
-            if (isSyncing) return;
-            isSyncing = true;
-
-            cloudLoad().then(function(cloudData) {
-                if (cloudData && cloudData.comments) {
-                    var cloudTs = cloudData.timestamp || 0;
-                    var localData = getLocal();
-
-                    // 云端有更新，或者本地为空，用云端数据
-                    if (cloudTs > lastCloudTimestamp || localData.length === 0) {
-                        if (JSON.stringify(cloudData.comments) !== JSON.stringify(localData)) {
-                            saveLocal(cloudData.comments);
-                            loadNext();
-                        }
-                        lastCloudTimestamp = cloudTs;
-                    }
+            return cloudLoad().then(function(cloudComments) {
+                if (cloudComments !== null) {
+                    // 云端有数据，直接用云端的
+                    currentComments = cloudComments;
+                    render();
                 }
-                isSyncing = false;
-            }).catch(function() {
-                isSyncing = false;
             });
         }
 
         function doCopy() {
+            if (isOperating) return;
+            isOperating = true;
+
             var ta = document.getElementById('commentText');
-            if (!ta) return;
+            if (!ta) { isOperating = false; return; }
+
             var text = ta.value;
 
             function afterCopy() {
                 showToast('✅ 已复制！');
-                var comments = getLocal();
-                if (comments.length > 0) {
-                    comments.shift();
-                    saveLocal(comments);
-                    cloudSave(comments).then(function() {
-                        loadNext();
-                    });
-                } else {
-                    loadNext();
-                }
+
+                // 删除第一条，保存到云端
+                currentComments.shift();
+                cloudSave(currentComments).then(function() {
+                    render();
+                    isOperating = false;
+                }).catch(function() {
+                    render();
+                    isOperating = false;
+                });
             }
 
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -219,34 +191,33 @@
         }
 
         function doSkip() {
-            var comments = getLocal();
-            if (comments.length > 0) {
-                comments.shift();
-                saveLocal(comments);
-                cloudSave(comments).then(function() {
-                    loadNext();
-                });
-            }
-            showToast('⏭ 已跳过');
+            if (isOperating) return;
+            isOperating = true;
+
+            currentComments.shift();
+            cloudSave(currentComments).then(function() {
+                render();
+                showToast('⏭ 已跳过');
+                isOperating = false;
+            }).catch(function() {
+                render();
+                isOperating = false;
+            });
         }
 
-        // ========== 初始化 + 轮询 ==========
-        // 首次加载
+        // ========== 启动 ==========
         showBadge('☁ 同步中...', 'loading');
-        syncFromCloud();
+        syncFromCloud().then(function() {
+            showBadge('☁ 已同步', 'success');
+        });
 
-        // 每3秒轮询一次云端，实现多设备实时同步
+        // 每 3 秒轮询云端，实现实时同步
         setInterval(function() {
             showBadge('🔄 同步中...', 'syncing');
             syncFromCloud().then(function() {
                 showBadge('☁ 已同步', 'success');
             });
         }, 3000);
-
-        // 初始化完成后显示同步状态
-        setTimeout(function() {
-            showBadge('☁ 已同步', 'success');
-        }, 2000);
     </script>
 </body>
 </html>
