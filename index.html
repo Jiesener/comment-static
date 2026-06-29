@@ -190,7 +190,7 @@
                 // 检查是否已分配
                 var myAssigned = cloudData.assignments[myDeviceId];
                 if (myAssigned && cloudData.comments.indexOf(myAssigned) >= 0) {
-                    return myAssigned; // 已分配，直接返回
+                    return myAssigned;
                 }
 
                 // 找未分配的评论
@@ -201,17 +201,23 @@
 
                 if (unassigned.length === 0) return null;
 
-                // 使用 nextIndex 确保顺序分配，避免随机冲突
+                // 使用 nextIndex 确保顺序分配
                 var idx = cloudData.nextIndex % unassigned.length;
                 var chosen = unassigned[idx];
 
-                // 认领
+                // 认领并立即保存
                 cloudData.assignments[myDeviceId] = chosen;
                 cloudData.nextIndex = (cloudData.nextIndex + 1) % cloudData.comments.length;
 
-                // 保存
                 return cloudSave(cloudData).then(function() {
-                    return chosen;
+                    // 立即验证：重新加载云端数据检查分配是否有效
+                    return cloudLoad().then(function(verifyData) {
+                        if (verifyData && verifyData.assignments && verifyData.assignments[myDeviceId] === chosen) {
+                            return chosen; // 验证通过
+                        } else {
+                            return null; // 验证失败，需要重试
+                        }
+                    });
                 });
             });
         }
@@ -222,7 +228,14 @@
                 if (!data || !data.assignments) return false;
                 cloudData = data;
                 var myAssigned = cloudData.assignments[myDeviceId];
-                return (myAssigned === myComment);
+                if (myAssigned === myComment) return true;
+                // 如果分配被覆盖了，重新分配
+                if (myAssigned && cloudData.comments.indexOf(myAssigned) >= 0) {
+                    myComment = myAssigned;
+                    render();
+                    return true;
+                }
+                return false;
             });
         }
 
