@@ -127,6 +127,10 @@
             return d.innerHTML;
         }
 
+        function sleep(ms) {
+            return new Promise(function(resolve) { setTimeout(resolve, ms); });
+        }
+
         // ========== 云端操作 ==========
         function cloudLoad() {
             return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
@@ -134,7 +138,7 @@
             }).then(function(r) { return r.json(); })
               .then(function(d) {
                   if (d.record) return d.record;
-                  return { comments: [], assignments: {}, nextIndex: 0, timestamp: 0 };
+                  return { comments: [], assignments: {}, timestamp: 0 };
               }).catch(function() { return null; });
         }
 
@@ -149,7 +153,7 @@
               .catch(function() { return false; });
         }
 
-        // ========== 核心逻辑：claim-and-verify ==========
+        // ========== 核心逻辑 ==========
         var myComment = null;
         var cloudData = null;
         var isOperating = false;
@@ -169,119 +173,80 @@
             if (!myComment) {
                 area.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p><p style="font-size:14px">等待提交新内容...</p></div>';
             } else {
-                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(myComment) + '</textarea><div class="btn-group"><button onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
+                area.innerHTML = '<textarea id="commentText" readonly>' + escapeHtml(myComment) + '</textarea><div class="btn-group"><button id="copyBtn" onclick="doCopy()">📋 复制</button><button class="secondary" onclick="doSkip()">⏭ 跳过</button></div>';
             }
         }
 
-        // 核心：claim-and-verify 分配算法
-        // 1. 加载云端数据
-        // 2. 找到未分配的评论
-        // 3. 认领一条（保存）
-        // 4. 立即验证（重新加载）
-        // 5. 如果验证失败，重试（最多10次）
-        function claimComment() {
-            return cloudLoad().then(function(data) {
-                if (!data) return null;
+        // 分配评论（简单可靠版本）
+        async function assignComment() {
+            showBadge('☁ 分配中...', 'loading');
+
+            for (var attempt = 0; attempt < 30; attempt++) {
+                // 1. 加载云端数据
+                var data = await cloudLoad();
+                if (!data) {
+                    await sleep(100);
+                    continue;
+                }
                 cloudData = data;
                 if (!cloudData.assignments) cloudData.assignments = {};
                 if (!cloudData.comments) cloudData.comments = [];
-                if (!cloudData.nextIndex) cloudData.nextIndex = 0;
 
-                // 检查是否已分配
+                // 2. 检查是否已分配
                 var myAssigned = cloudData.assignments[myDeviceId];
                 if (myAssigned && cloudData.comments.indexOf(myAssigned) >= 0) {
-                    return myAssigned;
+                    myComment = myAssigned;
+                    render();
+                    showBadge('☁ 已分配', 'success');
+                    return true;
                 }
 
-                // 找未分配的评论
+                // 3. 找未分配的评论
                 var assignedComments = Object.values(cloudData.assignments);
                 var unassigned = cloudData.comments.filter(function(c) {
                     return assignedComments.indexOf(c) < 0;
                 });
 
-                if (unassigned.length === 0) return null;
+                if (unassigned.length === 0) {
+                    myComment = null;
+                    render();
+                    showBadge('📭 已用完', 'success');
+                    return false;
+                }
 
-                // 使用 nextIndex 确保顺序分配
-                var idx = cloudData.nextIndex % unassigned.length;
+                // 4. 随机选一条
+                var idx = Math.floor(Math.random() * unassigned.length);
                 var chosen = unassigned[idx];
 
-                // 认领并立即保存
+                // 5. 保存分配
                 cloudData.assignments[myDeviceId] = chosen;
-                cloudData.nextIndex = (cloudData.nextIndex + 1) % cloudData.comments.length;
-
-                return cloudSave(cloudData).then(function() {
-                    // 立即验证：重新加载云端数据检查分配是否有效
-                    return cloudLoad().then(function(verifyData) {
-                        if (verifyData && verifyData.assignments && verifyData.assignments[myDeviceId] === chosen) {
-                            return chosen; // 验证通过
-                        } else {
-                            return null; // 验证失败，需要重试
-                        }
-                    });
-                });
-            });
-        }
-
-        // 验证分配是否有效
-        function verifyAssignment() {
-            return cloudLoad().then(function(data) {
-                if (!data || !data.assignments) return false;
-                cloudData = data;
-                var myAssigned = cloudData.assignments[myDeviceId];
-                if (myAssigned === myComment) return true;
-                // 如果分配被覆盖了，重新分配
-                if (myAssigned && cloudData.comments.indexOf(myAssigned) >= 0) {
-                    myComment = myAssigned;
-                    render();
-                    return true;
+                var saved = await cloudSave(cloudData);
+                if (!saved) {
+                    await sleep(100);
+                    continue;
                 }
-                return false;
-            });
-        }
 
-        // 初始化：claim-and-verify 循环
-        function initAssignment() {
-            showBadge('☁ 分配中...', 'loading');
-
-            var attempts = 0;
-            var maxAttempts = 20;
-
-            function tryAssign() {
-                attempts++;
-                claimComment().then(function(chosen) {
-                    if (!chosen) {
-                        // 没有更多评论
-                        myComment = null;
-                        render();
-                        showBadge('📭 已用完', 'success');
-                        return;
-                    }
-
+                // 6. 立即验证
+                await sleep(200);
+                var verifyData = await cloudLoad();
+                if (verifyData && verifyData.assignments && verifyData.assignments[myDeviceId] === chosen) {
                     myComment = chosen;
                     render();
+                    showBadge('☁ 已分配', 'success');
+                    return true;
+                }
 
-                    // 立即验证
-                    setTimeout(function() {
-                        verifyAssignment().then(function(valid) {
-                            if (valid) {
-                                showBadge('☁ 已分配', 'success');
-                            } else if (attempts < maxAttempts) {
-                                // 冲突，重试
-                                showBadge('🔄 重新分配...', 'syncing');
-                                tryAssign();
-                            } else {
-                                showBadge('☁ 已分配(可能有冲突)', 'success');
-                            }
-                        });
-                    }, 300); // 等300ms让保存生效
-                });
+                // 验证失败，重试
+                showBadge('🔄 重试中...', 'syncing');
+                await sleep(50);
             }
 
-            tryAssign();
+            showBadge('⚠️ 分配失败', 'error');
+            return false;
         }
 
-        // 复制/跳过后重新分配
-        function doCopy() {
+        // 复制
+        async function doCopy() {
             if (isOperating || !myComment) return;
             isOperating = true;
 
@@ -290,62 +255,81 @@
 
             var text = ta.value;
 
-            function afterCopy() {
+            // 复制到剪贴板
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    ta.select();
+                    document.execCommand('copy');
+                }
                 showToast('✅ 已复制！');
+            } catch (e) {
+                showToast('⚠️ 复制失败');
+                isOperating = false;
+                return;
+            }
 
-                // 删除评论和分配
+            // 从云端删除这条评论
+            var data = await cloudLoad();
+            if (data) {
+                cloudData = data;
                 var idx = cloudData.comments.indexOf(text);
                 if (idx >= 0) cloudData.comments.splice(idx, 1);
                 delete cloudData.assignments[myDeviceId];
-                myComment = null;
-
-                // 保存到云端，然后分配下一条
-                cloudSave(cloudData).then(function() {
-                    initAssignment().then(function() {
-                        isOperating = false;
-                    });
-                });
+                await cloudSave(cloudData);
             }
 
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(afterCopy).catch(function() {
-                    ta.select(); document.execCommand('copy'); afterCopy();
-                });
-            } else {
-                ta.select(); document.execCommand('copy'); afterCopy();
-            }
+            myComment = null;
+
+            // 分配下一条
+            await assignComment();
+            isOperating = false;
         }
 
-        function doSkip() {
+        // 跳过
+        async function doSkip() {
             if (isOperating) return;
             isOperating = true;
 
-            delete cloudData.assignments[myDeviceId];
-            myComment = null;
+            // 删除分配，但保留评论
+            var data = await cloudLoad();
+            if (data) {
+                cloudData = data;
+                delete cloudData.assignments[myDeviceId];
+                await cloudSave(cloudData);
+            }
 
-            cloudSave(cloudData).then(function() {
-                showToast('⏭ 已跳过');
-                initAssignment().then(function() {
-                    isOperating = false;
-                });
-                isOperating = false;
-            });
+            myComment = null;
+            showToast('⏭ 已跳过');
+
+            // 分配下一条
+            await assignComment();
+            isOperating = false;
         }
 
         // ========== 启动 ==========
-        initAssignment();
+        assignComment();
 
-        // 每 2 秒轮询验证
-        setInterval(function() {
+        // 每 3 秒轮询验证
+        setInterval(async function() {
             if (myComment && !isOperating) {
-                verifyAssignment().then(function(valid) {
-                    if (!valid && myComment) {
+                var data = await cloudLoad();
+                if (data && data.assignments) {
+                    var myAssigned = data.assignments[myDeviceId];
+                    if (myAssigned !== myComment) {
                         // 分配被覆盖，重新分配
-                        initAssignment();
+                        cloudData = data;
+                        if (myAssigned && data.comments.indexOf(myAssigned) >= 0) {
+                            myComment = myAssigned;
+                            render();
+                        } else {
+                            assignComment();
+                        }
                     }
-                });
+                }
             }
-        }, 2000);
+        }, 3000);
     </script>
 </body>
 </html>
