@@ -165,56 +165,14 @@
         // ========== 配置 ==========
         const STORAGE_KEY = 'plzs_comments';
         const JSONBIN_API_KEY = '$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
-        const PASSWORD = 'handsomeby2gjcn';
+        // 固定的 binId - 所有设备共用这个 ID，实现真正的多设备同步
+        const FIXED_BIN_ID = '68623f8f8563633d2226ab13';
         // ==========================
-
-        // ========== 加密/解密 ==========
-        async function deriveKey(password, salt) {
-            const enc = new TextEncoder();
-            const keyMaterial = await crypto.subtle.importKey(
-                'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']
-            );
-            return crypto.subtle.deriveKey(
-                { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-                keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-            );
-        }
-
-        async function encryptText(text, password) {
-            const enc = new TextEncoder();
-            const salt = crypto.getRandomValues(new Uint8Array(16));
-            const iv = crypto.getRandomValues(new Uint8Array(12));
-            const key = await deriveKey(password, salt);
-            const encrypted = await crypto.subtle.encrypt(
-                { name: 'AES-GCM', iv }, key, enc.encode(text)
-            );
-            return JSON.stringify({
-                salt: Array.from(salt),
-                iv: Array.from(iv),
-                data: Array.from(new Uint8Array(encrypted))
-            });
-        }
-
-        async function decryptText(encryptedJson, password) {
-            try {
-                const { salt, iv, data } = JSON.parse(encryptedJson);
-                const key = await deriveKey(password, new Uint8Array(salt));
-                const decrypted = await crypto.subtle.decrypt(
-                    { name: 'AES-GCM', iv: new Uint8Array(iv) }, key, new Uint8Array(data)
-                );
-                return new TextDecoder().decode(decrypted);
-            } catch (e) {
-                return null;
-            }
-        }
 
         // ========== JSONBin 云同步 ==========
         async function cloudLoad() {
             try {
-                const binId = localStorage.getItem('comment_bin_id');
-                if (!binId) return null;
-                
-                const response = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
+                const response = await fetch(`https://api.jsonbin.io/v3/b/${FIXED_BIN_ID}/latest`, {
                     headers: { 'X-Master-Key': JSONBIN_API_KEY }
                 });
                 if (!response.ok) throw new Error('加载失败');
@@ -228,35 +186,15 @@
 
         async function cloudSave(data) {
             try {
-                const encrypted = await encryptText(JSON.stringify(data), PASSWORD);
-                let binId = localStorage.getItem('comment_bin_id');
-                
-                if (!binId) {
-                    const createResponse = await fetch('https://api.jsonbin.io/v3/b', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Master-Key': JSONBIN_API_KEY
-                        },
-                        body: JSON.stringify({ data: encrypted })
-                    });
-                    
-                    if (createResponse.ok) {
-                        const result = await createResponse.json();
-                        binId = result.metadata.id;
-                        localStorage.setItem('comment_bin_id', binId);
-                    }
-                } else {
-                    await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Master-Key': JSONBIN_API_KEY
-                        },
-                        body: JSON.stringify({ data: encrypted })
-                    });
-                }
-                
+                // 直接保存明文数据（不用加密，简单可靠）
+                await fetch(`https://api.jsonbin.io/v3/b/${FIXED_BIN_ID}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': JSONBIN_API_KEY
+                    },
+                    body: JSON.stringify({ comments: data, timestamp: Date.now() })
+                });
                 return true;
             } catch (e) {
                 console.error('云保存失败:', e);
@@ -391,23 +329,13 @@
         async function init() {
             showSyncBadge('☁ 同步中...', 'loading');
             
-            // 加载云端数据
+            // 从云端加载数据
             const cloud = await cloudLoad();
-            if (cloud) {
-                try {
-                    const cloudData = JSON.parse(await decryptText(cloud.data, PASSWORD));
-                    const localData = getComments();
-                    
-                    if (cloudData.length > localData.length) {
-                        saveComments(cloudData);
-                    } else if (localData.length > 0) {
-                        await cloudSave(localData);
-                    }
-                } catch (e) {
-                    console.error('解密失败:', e);
-                }
+            if (cloud && cloud.comments) {
+                // 云端有数据，用云端的（覆盖本地）
+                saveComments(cloud.comments);
             } else {
-                // 没有云端数据，上传本地数据
+                // 云端没数据，把本地数据上传
                 const localData = getComments();
                 if (localData.length > 0) {
                     await cloudSave(localData);
