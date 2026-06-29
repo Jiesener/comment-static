@@ -1,207 +1,186 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>评论展示 - 评论助手</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
-        .c{background:#fff;padding:30px 24px;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:500px;width:100%;text-align:center}
-        h1{color:#333;margin-bottom:8px;font-size:22px}
-        .did{font-size:11px;color:#aaa;margin-bottom:12px}
-        .cb{display:inline-block;background:rgba(102,126,234,.12);color:#667eea;font-size:13px;padding:4px 14px;border-radius:20px;margin-bottom:20px;font-weight:600}
-        textarea{width:100%;min-height:120px;padding:15px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;line-height:1.6;resize:none;margin-bottom:16px;font-family:inherit}
-        textarea:focus{outline:none;border-color:#667eea}
-        .bg{display:flex;gap:10px}
-        button{flex:1;padding:14px 20px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer}
-        button:active{transform:scale(.97)}
-        button.s{background:#f0f0f0;color:#666;flex:.5}
-        button:disabled{opacity:.4;cursor:not-allowed}
-        .emp{color:#999;font-size:16px;padding:50px 0}
-        .emp p{margin-top:8px;font-size:14px}
-        .ld{color:#667eea;font-size:16px;padding:50px 0}
-        .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-80px);background:#27ae60;color:#fff;padding:12px 24px;border-radius:10px;font-weight:600;font-size:15px;box-shadow:0 8px 30px rgba(0,0,0,.2);transition:transform .3s;z-index:999;opacity:0}
-        .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
-        .nl{display:flex;justify-content:center;gap:20px;margin-top:20px}
-        .nl a{color:#888;text-decoration:none;font-size:14px}
-        .sb{position:fixed;bottom:20px;right:20px;background:rgba(0,0,0,.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;z-index:1000}
-        .sb.ok{background:#27ae60}.sb.er{background:#e74c3c}.sb.ld{background:#f39c12}.sb.sy{background:#3498db;animation:p .5s infinite}
-        @keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>评论展示</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.box{background:#fff;padding:30px 24px;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:500px;width:100%;text-align:center}
+h1{color:#333;margin-bottom:12px;font-size:22px}
+.info{font-size:12px;color:#aaa;margin-bottom:16px}
+.badge{display:inline-block;background:rgba(102,126,234,.12);color:#667eea;font-size:13px;padding:4px 14px;border-radius:20px;margin-bottom:20px;font-weight:600}
+textarea{width:100%;min-height:120px;padding:15px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;line-height:1.6;resize:none;margin-bottom:16px;font-family:inherit}
+.btns{display:flex;gap:10px}
+button{flex:1;padding:14px 20px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer}
+button:active{transform:scale(.97)}
+button.sec{background:#f0f0f0;color:#666;flex:.5}
+button:disabled{opacity:.4;cursor:not-allowed}
+.empty{color:#999;font-size:16px;padding:50px 0}
+.empty p{margin-top:8px;font-size:14px}
+.loading{color:#667eea;font-size:16px;padding:50px 0}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-80px);background:#27ae60;color:#fff;padding:12px 24px;border-radius:10px;font-weight:600;font-size:15px;box-shadow:0 8px 30px rgba(0,0,0,.2);transition:transform .3s;z-index:999;opacity:0}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.nav{display:flex;justify-content:center;gap:20px;margin-top:20px}
+.nav a{color:#888;text-decoration:none;font-size:14px}
+.sync{position:fixed;bottom:20px;right:20px;background:rgba(0,0,0,.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;z-index:1000}
+.sync.ok{background:#27ae60}.sync.ld{background:#f39c12}
+</style>
 </head>
 <body>
 <div class="toast" id="toast"></div>
-<div class="sb" id="sb">☁ 分配中...</div>
-<div class="c">
-    <h1>📋 评论展示</h1>
-    <div class="did" id="did"></div>
-    <div class="cb">📌 剩余 <strong id="cnt">0</strong> 条</div>
-    <div id="box"><div class="ld">⏳ 正在分配...</div></div>
-    <div class="nl"><a href="submit.html">去提交内容 →</a></div>
+<div class="sync" id="sync">☁ 就绪</div>
+<div class="box">
+<h1>📋 评论展示</h1>
+<div class="info" id="info"></div>
+<div class="badge">📌 剩余 <strong id="cnt">0</strong> 条</div>
+<div id="area"><div class="loading">⏳ 加载中...</div></div>
+<div class="nav"><a href="submit.html">去提交内容 →</a></div>
 </div>
+
 <script>
 var AK='$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
 var BI='6a4270e3f5f4af5e2941a479';
 var DK='plzs_device_id';
 
 // 设备ID
-var did=localStorage.getItem(DK);
-if(!did){did='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,did)}
-document.getElementById('did').textContent='📱 '+did;
+var DEVID=localStorage.getItem(DK);
+if(!DEVID){DEVID='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,DEVID)}
+document.getElementById('info').textContent='📱 '+DEVID;
 
-// 工具
-function sb(t,c){var e=document.getElementById('sb');e.textContent=t;e.className='sb '+c}
+function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.className='sync '+c}
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-// 云端
 function cLoad(){
-    return fetch('https://api.jsonbin.io/v3/b/'+BI+'/latest',{headers:{'X-Master-Key':AK}})
-    .then(function(r){return r.json()})
-    .then(function(d){return d.record||{comments:[],assignments:{}}})
-    .catch(function(){return null})
+  return fetch('https://api.jsonbin.io/v3/b/'+BI+'/latest',{headers:{'X-Master-Key':AK}})
+  .then(function(r){return r.json()}).then(function(d){
+    var rec=d.record||{};
+    return{comments:rec.comments||[],assignments:rec.assignments||{},ts:rec.timestamp||0}
+  }).catch(function(){return null})
 }
+
 function cSave(data){
-    data.timestamp=Date.now();
-    return fetch('https://api.jsonbin.io/v3/b/'+BI,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},body:JSON.stringify(data)})
-    .then(function(){return true}).catch(function(){return false})
+  data.ts=Date.now();
+  return fetch('https://api.jsonbin.io/v3/b/'+BI,{
+    method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},
+    body:JSON.stringify(data)
+  }).then(function(){return true}).catch(function(){return false})
 }
 
-// 状态
-var myComment=null, cloudData=null, busy=false;
+var DATA=null,CUR=null,BUSY=false;
 
-// 渲染
 function render(){
-    var b=document.getElementById('box'), c=document.getElementById('cnt');
-    if(cloudData){
-        var ac=Object.values(cloudData.assignments||{});
-        var ua=(cloudData.comments||[]).filter(function(x){return ac.indexOf(x)<0});
-        c.textContent=ua.length;
-    }
-    if(!myComment){
-        b.innerHTML='<div class="emp"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
-    } else {
-        b.innerHTML='<textarea id="ta" readonly>'+esc(myComment)+'</textarea><div class="bg"><button id="cb" onclick="doCopy()">📋 复制</button><button class="s" onclick="doSkip()">⏭ 跳过</button></div>';
-    }
+  var b=document.getElementById('area'),c=document.getElementById('cnt');
+  if(DATA){
+    var ac=Object.values(DATA.assignments);
+    c.textContent=DATA.comments.filter(function(x){return ac.indexOf(x)<0}).length;
+  }
+  if(!CUR){
+    b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
+  }else{
+    b.innerHTML='<textarea id="ta" readonly>'+esc(CUR)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
+    document.getElementById('copyBtn').onclick=doCopy;
+    document.getElementById('skipBtn').onclick=doSkip;
+  }
 }
 
-// 分配
-async function assign(){
-    sb('☁ 分配中...','ld');
-    for(var i=0;i<30;i++){
-        try{
-            var d=await cLoad();
-            if(!d){await sleep(100);continue}
-            cloudData=d;
-            if(!cloudData.assignments)cloudData.assignments={};
-            if(!cloudData.comments)cloudData.comments=[];
+async function loadAndAssign(){
+  showSync('☁ 加载中...','ld');
+  var d=await cLoad();
+  if(!d){showSync('⚠️ 加载失败','');return}
+  DATA=d;
 
-            // 已分配
-            var mine=cloudData.assignments[did];
-            if(mine&&cloudData.comments.indexOf(mine)>=0){
-                myComment=mine;render();sb('☁ 已分配','ok');return true;
-            }
+  // 检查是否已分配
+  var mine=DATA.assignments[DEVID];
+  if(mine&&DATA.comments.indexOf(mine)>=0){
+    CUR=mine;render();showSync('☁ 已同步','ok');return;
+  }
 
-            // 找未分配
-            var ac=Object.values(cloudData.assignments);
-            var ua=cloudData.comments.filter(function(x){return ac.indexOf(x)<0});
-            if(ua.length===0){myComment=null;render();sb('📭 已用完','ok');return false}
+  // 找未分配的
+  var ac=Object.values(DATA.assignments);
+  var ua=DATA.comments.filter(function(x){return ac.indexOf(x)<0});
+  if(ua.length===0){CUR=null;render();showSync('📭 已用完','ok');return}
 
-            // 随机选一条
-            var pick=ua[Math.floor(Math.random()*ua.length)];
-            cloudData.assignments[did]=pick;
-            if(!(await cSave(cloudData))){await sleep(100);continue}
-
-            // 验证
-            await sleep(200);
-            var v=await cLoad();
-            if(v&&v.assignments&&v.assignments[did]===pick){
-                myComment=pick;render();sb('☁ 已分配','ok');return true;
-            }
-            sb('🔄 重试...','sy');await sleep(50);
-        }catch(e){
-            console.error('assign error:',e);await sleep(100);
-        }
-    }
-    sb('⚠️ 失败','er');return false;
+  // 随机分配
+  var pick=ua[Math.floor(Math.random()*ua.length)];
+  DATA.assignments[DEVID]=pick;
+  await cSave(DATA);
+  CUR=pick;render();showSync('☁ 已同步','ok');
 }
 
-// 复制
 async function doCopy(){
-    if(busy||!myComment)return;
-    busy=true;
-    var btn=document.getElementById('cb');
-    if(btn)btn.disabled=true;
+  if(BUSY||!CUR)return;
+  BUSY=true;
+  var btn=document.getElementById('copyBtn');
+  if(btn)btn.disabled=true;
 
-    var ta=document.getElementById('ta');
-    if(!ta){busy=false;if(btn)btn.disabled=false;return}
-    var text=ta.value;
-
-    try{
-        if(navigator.clipboard&&navigator.clipboard.writeText){
-            await navigator.clipboard.writeText(text);
-        }else{ta.select();document.execCommand('copy')}
-        toast('✅ 已复制！');
-    }catch(e){
-        toast('⚠️ 复制失败');
-        busy=false;if(btn)btn.disabled=false;return;
+  // 复制
+  var text=CUR;
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(text);
+    }else{
+      var ta=document.getElementById('ta');
+      if(ta){ta.select();document.execCommand('copy')}
     }
+    toast('✅ 已复制！');
+  }catch(e){
+    toast('⚠️ 复制失败');
+    BUSY=false;if(btn)btn.disabled=false;return;
+  }
 
-    try{
-        // 删评论
-        var d=await cLoad();
-        if(d){
-            cloudData=d;
-            if(!cloudData.assignments)cloudData.assignments={};
-            if(!cloudData.comments)cloudData.comments=[];
-            var idx=cloudData.comments.indexOf(text);
-            if(idx>=0)cloudData.comments.splice(idx,1);
-            delete cloudData.assignments[did];
-            await cSave(cloudData);
-        }
-    }catch(e){console.error('delete error:',e)}
+  // 从云端删除
+  showSync('☁ 保存中...','ld');
+  var d=await cLoad();
+  if(d){
+    DATA=d;
+    var idx=DATA.comments.indexOf(text);
+    if(idx>=0)DATA.comments.splice(idx,1);
+    delete DATA.assignments[DEVID];
+    await cSave(DATA);
+  }
 
-    myComment=null;
-    await assign();
-    busy=false;
+  CUR=null;
+  // 重新加载并分配
+  await loadAndAssign();
+  BUSY=false;
 }
 
-// 跳过
 async function doSkip(){
-    if(busy)return;
-    busy=true;
-    try{
-        var d=await cLoad();
-        if(d){
-            cloudData=d;
-            if(!cloudData.assignments)cloudData.assignments={};
-            delete cloudData.assignments[did];
-            await cSave(cloudData);
-        }
-    }catch(e){console.error('skip error:',e)}
-    myComment=null;
-    toast('⏭ 已跳过');
-    await assign();
-    busy=false;
+  if(BUSY)return;
+  BUSY=true;
+  showSync('☁ 跳过中...','ld');
+  var d=await cLoad();
+  if(d){
+    DATA=d;
+    delete DATA.assignments[DEVID];
+    await cSave(DATA);
+  }
+  CUR=null;
+  toast('⏭ 已跳过');
+  await loadAndAssign();
+  BUSY=false;
 }
 
 // 启动
-assign();
+loadAndAssign();
 
 // 轮询
 setInterval(async function(){
-    if(myComment||busy)return;
-    try{
-        var d=await cLoad();
-        if(d&&d.assignments){
-            var mine=d.assignments[did];
-            if(mine&&d.comments&&d.comments.indexOf(mine)>=0){
-                cloudData=d;myComment=mine;render();
-            }
-        }
-    }catch(e){}
+  if(BUSY)return;
+  var d=await cLoad();
+  if(!d)return;
+  var mine=d.assignments?d.assignments[DEVID]:null;
+  if(mine&&d.comments&&d.comments.indexOf(mine)>=0){
+    if(mine!==CUR){DATA=d;CUR=mine;render();showSync('☁ 已同步','ok')}
+  }else if(!CUR){
+    DATA=d;
+    var ac=Object.values(d.assignments||{});
+    var ua=d.comments.filter(function(x){return ac.indexOf(x)<0});
+    if(ua.length>0){CUR=ua[0];d.assignments[DEVID]=CUR;cSave(d);render();showSync('☁ 已同步','ok')}
+  }
 },3000);
 </script>
 </body>
