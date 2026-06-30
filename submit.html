@@ -44,34 +44,38 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <div class="nav"><a href="index.html">← 去展示</a></div>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
-var firebaseConfig = {
-    databaseURL: "https://comment-app-5a494-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-var db = firebase.database();
+var FB_URL = 'https://comment-app-5a494-default-rtdb.firebaseio.com';
 
 function showSync(t, c) { var e = document.getElementById('sync'); e.textContent = t; e.className = 'sync ' + c; }
 function showMsg(t, c) { var e = document.getElementById('msg'); e.textContent = t; e.className = 'msg ' + c; e.style.display = 'block'; setTimeout(function() { e.style.display = 'none'; }, 5000); }
-function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
-function loadData() {
-    return db.ref('data').once('value').then(function(snap) {
-        var val = snap.val();
-        if (!val) return { comments: [], assignments: {} };
-        return { comments: val.comments || [], assignments: val.assignments || {} };
-    });
+// Firebase REST API
+function fbLoad() {
+    return fetch(FB_URL + '/data.json')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (!d) return { comments: [], assignments: {} };
+        return { comments: d.comments || [], assignments: d.assignments || {} };
+    })
+    .catch(function(e) { console.error('load error:', e); return null; });
 }
 
-function saveData(data) {
-    return db.ref('data').set(data);
+function fbSave(data) {
+    return fetch(FB_URL + '/data.json', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() { return true; })
+    .catch(function(e) { console.error('save error:', e); return false; });
 }
 
 function updateCount() {
     showSync('☁ 读取中...', 'ld');
-    loadData().then(function(d) {
+    fbLoad().then(function(d) {
+        if (!d) { showSync('⚠️ 加载失败', ''); return; }
         var count = (d.comments || []).length;
         var assigned = d.assignments ? Object.keys(d.assignments).length : 0;
         document.getElementById('cnt').textContent = count + '条 (已分配' + assigned + '条)';
@@ -94,16 +98,17 @@ function doSubmit() {
 
     var newData = { comments: comments, assignments: {} };
 
-    saveData(newData).then(function() {
-        showSync('☁ 已同步', 'ok');
-        showMsg('✅ 成功提交 ' + comments.length + ' 条内容！', 'ok');
-        document.getElementById('inp').value = '';
-        document.getElementById('lc').textContent = '0 行';
-        updateCount();
-        btn.disabled = false; btn.textContent = '📤 提交内容';
-    }).catch(function(e) {
-        showSync('⚠️ 失败', '');
-        showMsg('❌ 保存失败: ' + e.message, 'er');
+    fbSave(newData).then(function(ok) {
+        if (ok) {
+            showSync('☁ 已同步', 'ok');
+            showMsg('✅ 成功提交 ' + comments.length + ' 条内容！', 'ok');
+            document.getElementById('inp').value = '';
+            document.getElementById('lc').textContent = '0 行';
+            updateCount();
+        } else {
+            showSync('⚠️ 失败', '');
+            showMsg('❌ 保存失败', 'er');
+        }
         btn.disabled = false; btn.textContent = '📤 提交内容';
     });
 }
