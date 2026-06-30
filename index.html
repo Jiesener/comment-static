@@ -39,168 +39,176 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <div class="nav"><a href="submit.html">去提交内容 →</a></div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
-var AK='$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
-var BI='6a4270e3f5f4af5e2941a479';
-var DK='plzs_device_id';
+// Firebase 配置
+var firebaseConfig = {
+    databaseURL: "https://comment-app-5a494-default-rtdb.firebaseio.com"
+};
+firebase.initializeApp(firebaseConfig);
+var db = firebase.database();
 
 // 设备ID
-var DEVID=localStorage.getItem(DK);
-if(!DEVID){DEVID='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,DEVID)}
-document.getElementById('info').textContent='📱 '+DEVID;
+var DK = 'plzs_device_id';
+var DEVID = localStorage.getItem(DK);
+if (!DEVID) { DEVID = 'd' + Math.random().toString(36).slice(2, 8); localStorage.setItem(DK, DEVID); }
+document.getElementById('info').textContent = '📱 ' + DEVID;
 
-function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.className='sync '+c}
-function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
-function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function showSync(t, c) { var e = document.getElementById('sync'); e.textContent = t; e.className = 'sync ' + c; }
+function toast(t) { var e = document.getElementById('toast'); e.textContent = t; e.classList.add('show'); setTimeout(function() { e.classList.remove('show'); }, 1500); }
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-// 云端读写
-function cLoad(){
-  return fetch('https://api.jsonbin.io/v3/b/'+BI+'/latest',{headers:{'X-Master-Key':AK}})
-  .then(function(r){return r.json()}).then(function(d){
-    var rec=d.record||{};
-    return{comments:rec.comments||[],assignments:rec.assignments||{}}
-  }).catch(function(){return null})
+var DATA = null, CUR = null, BUSY = false;
+
+function render() {
+    var b = document.getElementById('area'), c = document.getElementById('cnt');
+    if (DATA) {
+        var comments = DATA.comments || [];
+        var assignments = DATA.assignments || {};
+        var ac = Object.values(assignments);
+        c.textContent = comments.filter(function(x) { return ac.indexOf(x) < 0; }).length;
+    }
+    if (!CUR) {
+        b.innerHTML = '<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
+    } else {
+        b.innerHTML = '<textarea id="ta" readonly>' + esc(CUR) + '</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
+        document.getElementById('copyBtn').onclick = doCopy;
+        document.getElementById('skipBtn').onclick = doSkip;
+    }
 }
 
-function cSave(data){
-  return fetch('https://api.jsonbin.io/v3/b/'+BI,{
-    method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},
-    body:JSON.stringify(data)
-  }).then(function(){return true}).catch(function(){return false})
+// 从 Firebase 加载数据
+function loadData() {
+    return db.ref('data').once('value').then(function(snap) {
+        var val = snap.val();
+        if (!val) return { comments: [], assignments: {} };
+        return { comments: val.comments || [], assignments: val.assignments || {} };
+    });
 }
 
-var DATA=null,CUR=null,BUSY=false;
-
-function render(){
-  var b=document.getElementById('area'),c=document.getElementById('cnt');
-  if(DATA){
-    var ac=Object.values(DATA.assignments);
-    c.textContent=DATA.comments.filter(function(x){return ac.indexOf(x)<0}).length;
-  }
-  if(!CUR){
-    b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
-  }else{
-    b.innerHTML='<textarea id="ta" readonly>'+esc(CUR)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
-    document.getElementById('copyBtn').onclick=doCopy;
-    document.getElementById('skipBtn').onclick=doSkip;
-  }
+// 保存数据到 Firebase
+function saveData(data) {
+    return db.ref('data').set(data);
 }
 
-// 分配评论：随机选一条未分配的，保存，不验证
-async function assign(){
-  showSync('☁ 分配中...','ld');
-  
-  // 随机延迟 100-600ms，减少并发冲突
-  await sleep(100 + Math.random() * 500);
-  
-  var d=await cLoad();
-  if(!d){showSync('⚠️ 加载失败','');return false}
-  DATA=d;
-  if(!DATA.assignments)DATA.assignments={};
-  if(!DATA.comments)DATA.comments=[];
+// 分配评论
+async function assign() {
+    showSync('☁ 分配中...', 'ld');
+    await sleep(100 + Math.random() * 300);
 
-  // 找未分配的
-  var ac=Object.values(DATA.assignments);
-  var ua=DATA.comments.filter(function(x){return ac.indexOf(x)<0});
-  
-  if(ua.length===0){
-    CUR=null;render();showSync('📭 已用完','ok');return false;
-  }
+    var d = await loadData();
+    DATA = d;
 
-  // 随机选一条
-  var pick=ua[Math.floor(Math.random()*ua.length)];
-  
-  // 保存分配
-  DATA.assignments[DEVID]=pick;
-  await cSave(DATA);
-  
-  CUR=pick;
-  render();
-  showSync('☁ 已同步','ok');
-  return true;
+    var comments = DATA.comments || [];
+    var assignments = DATA.assignments || {};
+
+    // 检查是否已分配
+    var mine = assignments[DEVID];
+    if (mine && comments.indexOf(mine) >= 0) {
+        CUR = mine; render(); showSync('☁ 已同步', 'ok'); return true;
+    }
+
+    // 找未分配的
+    var ac = Object.values(assignments);
+    var ua = comments.filter(function(x) { return ac.indexOf(x) < 0; });
+
+    if (ua.length === 0) { CUR = null; render(); showSync('📭 已用完', 'ok'); return false; }
+
+    // 随机选一条
+    var pick = ua[Math.floor(Math.random() * ua.length)];
+
+    // 保存分配
+    DATA.assignments[DEVID] = pick;
+    await saveData(DATA);
+
+    CUR = pick;
+    render();
+    showSync('☁ 已同步', 'ok');
+    return true;
 }
+
+function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
 // 复制
-async function doCopy(){
-  if(BUSY||!CUR)return;
-  BUSY=true;
-  var btn=document.getElementById('copyBtn');
-  if(btn)btn.disabled=true;
+async function doCopy() {
+    if (BUSY || !CUR) return;
+    BUSY = true;
+    var btn = document.getElementById('copyBtn');
+    if (btn) btn.disabled = true;
 
-  var text=CUR;
-  try{
-    if(navigator.clipboard&&navigator.clipboard.writeText){
-      await navigator.clipboard.writeText(text);
-    }else{
-      var ta=document.getElementById('ta');
-      if(ta){ta.select();document.execCommand('copy')}
+    var text = CUR;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            var ta = document.getElementById('ta');
+            if (ta) { ta.select(); document.execCommand('copy'); }
+        }
+        toast('✅ 已复制！');
+    } catch (e) {
+        toast('⚠️ 复制失败');
+        BUSY = false; if (btn) btn.disabled = false; return;
     }
-    toast('✅ 已复制！');
-  }catch(e){
-    toast('⚠️ 复制失败');
-    BUSY=false;if(btn)btn.disabled=false;return;
-  }
 
-  // 从云端删除这条评论
-  showSync('☁ 保存中...','ld');
-  var d=await cLoad();
-  if(d){
-    DATA=d;
-    var idx=DATA.comments.indexOf(text);
-    if(idx>=0)DATA.comments.splice(idx,1);
-    delete DATA.assignments[DEVID];
-    await cSave(DATA);
-  }
+    // 从 Firebase 删除这条评论
+    showSync('☁ 保存中...', 'ld');
+    var d = await loadData();
+    if (d) {
+        DATA = d;
+        var idx = DATA.comments.indexOf(text);
+        if (idx >= 0) DATA.comments.splice(idx, 1);
+        delete DATA.assignments[DEVID];
+        await saveData(DATA);
+    }
 
-  CUR=null;
-  // 分配下一条
-  await assign();
-  BUSY=false;
+    CUR = null;
+    await assign();
+    BUSY = false;
 }
 
 // 跳过
-async function doSkip(){
-  if(BUSY)return;
-  BUSY=true;
-  showSync('☁ 跳过中...','ld');
-  var d=await cLoad();
-  if(d){
-    DATA=d;
-    delete DATA.assignments[DEVID];
-    await cSave(DATA);
-  }
-  CUR=null;
-  toast('⏭ 已跳过');
-  await assign();
-  BUSY=false;
+async function doSkip() {
+    if (BUSY) return;
+    BUSY = true;
+    showSync('☁ 跳过中...', 'ld');
+    var d = await loadData();
+    if (d) {
+        DATA = d;
+        delete DATA.assignments[DEVID];
+        await saveData(DATA);
+    }
+    CUR = null;
+    toast('⏭ 已跳过');
+    await assign();
+    BUSY = false;
 }
 
 // 启动
 assign();
 
-// 每3秒轮询同步
-setInterval(async function(){
-  if(BUSY)return;
-  var d=await cLoad();
-  if(!d)return;
-  var mine=d.assignments?d.assignments[DEVID]:null;
-  if(mine&&d.comments&&d.comments.indexOf(mine)>=0){
-    if(mine!==CUR){DATA=d;CUR=mine;render();showSync('☁ 已同步','ok')}
-  }else if(!CUR){
-    // 我没有分配，但有未分配的评论，自动分配
-    DATA=d;
-    var ac=Object.values(d.assignments||{});
-    var ua=d.comments.filter(function(x){return ac.indexOf(x)<0});
-    if(ua.length>0){
-      CUR=ua[0];
-      d.assignments[DEVID]=CUR;
-      cSave(d);
-      render();
-      showSync('☁ 已同步','ok');
+// 实时监听数据变化
+db.ref('data').on('value', function(snap) {
+    var val = snap.val();
+    if (!val) return;
+    DATA = { comments: val.comments || [], assignments: val.assignments || {} };
+
+    var mine = DATA.assignments ? DATA.assignments[DEVID] : null;
+    if (mine && DATA.comments && DATA.comments.indexOf(mine) >= 0) {
+        if (mine !== CUR) { CUR = mine; render(); showSync('☁ 已同步', 'ok'); }
+    } else if (!CUR) {
+        // 我没有分配，自动分配
+        var ac = Object.values(DATA.assignments || {});
+        var ua = (DATA.comments || []).filter(function(x) { return ac.indexOf(x) < 0; });
+        if (ua.length > 0) {
+            CUR = ua[0];
+            DATA.assignments[DEVID] = CUR;
+            saveData(DATA);
+            render();
+            showSync('☁ 已同步', 'ok');
+        }
     }
-  }
-},3000);
+});
 </script>
 </body>
 </html>
