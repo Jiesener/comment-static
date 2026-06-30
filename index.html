@@ -25,7 +25,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .nav{display:flex;justify-content:center;gap:20px;margin-top:20px}
 .nav a{color:#888;text-decoration:none;font-size:14px}
 .sync{position:fixed;bottom:20px;right:20px;background:rgba(0,0,0,.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;z-index:1000}
-.sync.ok{background:#27ae60}.sync.ld{background:#f39c12}
+.sync.ok{background:#27ae60}.sync.ld{background:#f39c12}.sync.er{background:#e74c3c}
 </style>
 </head>
 <body>
@@ -44,7 +44,6 @@ var AK='$2a$10$hj2L8dQlL6o5l8zMYi9dP.n3ILlEpJU14/irLt8TA9QI9AMiivvi6';
 var BI='6a4270e3f5f4af5e2941a479';
 var DK='plzs_device_id';
 
-// 设备ID
 var DEVID=localStorage.getItem(DK);
 if(!DEVID){DEVID='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,DEVID)}
 document.getElementById('info').textContent='📱 '+DEVID;
@@ -52,17 +51,17 @@ document.getElementById('info').textContent='📱 '+DEVID;
 function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.className='sync '+c}
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
 function cLoad(){
   return fetch('https://api.jsonbin.io/v3/b/'+BI+'/latest',{headers:{'X-Master-Key':AK}})
   .then(function(r){return r.json()}).then(function(d){
     var rec=d.record||{};
-    return{comments:rec.comments||[],assignments:rec.assignments||{},ts:rec.timestamp||0}
+    return{comments:rec.comments||[],assignments:rec.assignments||{}}
   }).catch(function(){return null})
 }
 
 function cSave(data){
-  data.ts=Date.now();
   return fetch('https://api.jsonbin.io/v3/b/'+BI,{
     method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},
     body:JSON.stringify(data)
@@ -86,28 +85,65 @@ function render(){
   }
 }
 
-async function loadAndAssign(){
-  showSync('☁ 加载中...','ld');
-  var d=await cLoad();
-  if(!d){showSync('⚠️ 加载失败','');return}
-  DATA=d;
+// 核心：带验证的分配
+async function safeAssign(){
+  // 重试最多10次
+  for(var i=0;i<10;i++){
+    var d=await cLoad();
+    if(!d){await sleep(200);continue}
+    DATA=d;
+    if(!DATA.assignments)DATA.assignments={};
+    if(!DATA.comments)DATA.comments=[];
 
-  // 检查是否已分配
-  var mine=DATA.assignments[DEVID];
-  if(mine&&DATA.comments.indexOf(mine)>=0){
-    CUR=mine;render();showSync('☁ 已同步','ok');return;
+    // 检查是否已分配给我
+    var mine=DATA.assignments[DEVID];
+    if(mine&&DATA.comments.indexOf(mine)>=0){
+      CUR=mine;render();showSync('☁ 已同步','ok');return true;
+    }
+
+    // 找未分配的
+    var ac=Object.values(DATA.assignments);
+    var ua=DATA.comments.filter(function(x){return ac.indexOf(x)<0});
+    if(ua.length===0){CUR=null;render();showSync('📭 已用完','ok');return false}
+
+    // 选一条（用时间戳+设备ID哈希确保不同设备选不同）
+    var hash=0;
+    for(var j=0;j<DEVID.length;j++)hash=((hash<<5)-hash)+DEVID.charCodeAt(j);
+    var idx=Math.abs(hash+i)%ua.length;
+    var pick=ua[idx];
+
+    // 保存
+    DATA.assignments[DEVID]=pick;
+    if(!(await cSave(DATA))){await sleep(200);continue}
+
+    // 等待写入生效
+    await sleep(300);
+
+    // 验证：重新加载看分配是否还在
+    var verify=await cLoad();
+    if(verify&&verify.assignments&&verify.assignments[DEVID]===pick){
+      CUR=pick;render();showSync('☁ 已同步','ok');return true;
+    }
+
+    // 验证失败，说明冲突了，重试
+    showSync('🔄 重试...','ld');
+    await sleep(100);
   }
 
-  // 找未分配的
-  var ac=Object.values(DATA.assignments);
-  var ua=DATA.comments.filter(function(x){return ac.indexOf(x)<0});
-  if(ua.length===0){CUR=null;render();showSync('📭 已用完','ok');return}
+  // 10次都失败，用最后的数据
+  if(DATA&&DATA.comments.length>0){
+    var ac2=Object.values(DATA.assignments);
+    var ua2=DATA.comments.filter(function(x){return ac2.indexOf(x)<0});
+    if(ua2.length>0){CUR=ua2[0];DATA.assignments[DEVID]=CUR;cSave(DATA);render();showSync('☁ 已分配','ok');return true}
+  }
+  CUR=null;render();showSync('⚠️ 分配失败','er');return false;
+}
 
-  // 随机分配
-  var pick=ua[Math.floor(Math.random()*ua.length)];
-  DATA.assignments[DEVID]=pick;
-  await cSave(DATA);
-  CUR=pick;render();showSync('☁ 已同步','ok');
+async function loadAndAssign(){
+  showSync('☁ 加载中...','ld');
+  // 随机延迟减少并发冲突
+  await sleep(Math.random()*300);
+  await safeAssign();
 }
 
 async function doCopy(){
@@ -116,7 +152,6 @@ async function doCopy(){
   var btn=document.getElementById('copyBtn');
   if(btn)btn.disabled=true;
 
-  // 复制
   var text=CUR;
   try{
     if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -143,8 +178,8 @@ async function doCopy(){
   }
 
   CUR=null;
-  // 重新加载并分配
-  await loadAndAssign();
+  await sleep(300);
+  await safeAssign();
   BUSY=false;
 }
 
@@ -160,7 +195,8 @@ async function doSkip(){
   }
   CUR=null;
   toast('⏭ 已跳过');
-  await loadAndAssign();
+  await sleep(300);
+  await safeAssign();
   BUSY=false;
 }
 
