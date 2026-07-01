@@ -92,7 +92,7 @@ function doSubmit(){
     btn.disabled=true;btn.textContent='⏳ 保存中...';
     showSync('☁ 保存中...','ld');
 
-    jSave({comments:comments,assignments:{}}).then(function(ok){
+    jSave({comments:comments,assignments:{},counter:0}).then(function(ok){
         if(ok){
             showSync('☁ 已同步','ok');
             showMsg('✅ 成功提交 '+comments.length+' 条内容！','ok');
