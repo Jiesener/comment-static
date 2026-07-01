@@ -55,8 +55,8 @@ function jLoad(){
     return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
     .then(function(r){return r.json()})
     .then(function(d){
-        if(d.record)return{comments:d.record.comments||[],assignments:d.record.assignments||{}};
-        return{comments:[],assignments:{}};
+        if(d.record)return{comments:d.record.comments||[]};
+        return{comments:[]};
     }).catch(function(){return null});
 }
 
@@ -64,7 +64,7 @@ function jSave(data){
     return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
         method:'PUT',
         headers:{'Content-Type':'application/json','X-Master-Key':AK},
-        body:JSON.stringify({comments:data.comments,assignments:data.assignments,counter:data.counter||0})
+        body:JSON.stringify({comments:data.comments})
     }).then(function(){return true}).catch(function(){return false});
 }
 
@@ -72,9 +72,8 @@ function updateCount(){
     showSync('☁ 读取中...','ld');
     jLoad().then(function(d){
         if(!d){showSync('⚠️ 加载失败','');return}
-        var count=d.comments.length;
-        var assigned=Object.keys(d.assignments||{}).length;
-        document.getElementById('cnt').textContent=count+'条 (已分配'+assigned+'条)';
+        var count=(d.comments||[]).length;
+        document.getElementById('cnt').textContent=count+'条';
         showSync('☁ 已同步','ok');
     });
 }
@@ -92,7 +91,7 @@ function doSubmit(){
     btn.disabled=true;btn.textContent='⏳ 保存中...';
     showSync('☁ 保存中...','ld');
 
-    jSave({comments:comments,assignments:{},counter:0}).then(function(ok){
+    jSave({comments:comments}).then(function(ok){
         if(ok){
             showSync('☁ 已同步','ok');
             showMsg('✅ 成功提交 '+comments.length+' 条内容！','ok');
