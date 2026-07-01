@@ -9,37 +9,34 @@
 body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#11998e,#38ef7d);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
 .box{background:#fff;padding:30px 24px;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:500px;width:100%}
 h1{color:#333;margin-bottom:8px;font-size:22px;text-align:center}
-.bar{display:flex;justify-content:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
-.bar span{background:#f8f9fa;padding:6px 14px;border-radius:20px;font-size:13px;color:#666}
+.bar{text-align:center;margin-bottom:20px}
+.bar span{background:#f8f9fa;padding:6px 14px;border-radius:20px;font-size:13px;color:#666;display:inline-block;margin:0 6px}
 .bar strong{color:#11998e}
 .msg{padding:14px 16px;border-radius:12px;margin-bottom:20px;text-align:center;font-weight:600;font-size:15px}
 .msg.ok{background:#d4edda;color:#155724}
 .msg.er{background:#f8d7da;color:#721c24}
 textarea{width:100%;min-height:180px;padding:15px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;line-height:1.6;resize:vertical;margin-bottom:16px;font-family:inherit}
 textarea:focus{outline:none;border-color:#11998e}
-.hint{color:#888;font-size:13px;margin-bottom:16px;text-align:center;line-height:1.5}
+.hint{color:#888;font-size:13px;margin-bottom:16px;text-align:center}
 button{width:100%;padding:15px 30px;background:linear-gradient(135deg,#11998e,#38ef7d);color:#fff;border:none;border-radius:12px;font-size:17px;font-weight:600;cursor:pointer}
 button:active{transform:scale(.98)}
 button:disabled{opacity:.5;cursor:not-allowed}
 .nav{display:flex;justify-content:center;gap:20px;margin-top:20px}
 .nav a{color:#888;text-decoration:none;font-size:14px}
 .lc{text-align:right;font-size:12px;color:#aaa;margin-top:-12px;margin-bottom:16px}
-.sync{position:fixed;bottom:20px;right:20px;background:rgba(0,0,0,.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;z-index:1000}
-.sync.ok{background:#27ae60}.sync.ld{background:#f39c12}
 </style>
 </head>
 <body>
-<div class="sync" id="sync">☁ 准备中...</div>
 <div class="box">
 <h1>📝 提交内容</h1>
 <div class="bar">
-<span>📌 云端当前 <strong id="cnt">0</strong> 条</span>
-<span>⚠️ 提交将<strong>替换</strong>所有旧内容</span>
+<span>📌 云端 <strong id="cnt">0</strong> 条</span>
+<span>⚠️ 提交将替换所有旧内容</span>
 </div>
 <div class="msg" id="msg" style="display:none"></div>
 <textarea id="inp" placeholder="输入多条内容，每行一条&#10;例如：&#10;这条评论说的太对了&#10;支持！说的好" required></textarea>
 <div class="lc" id="lc">0 行</div>
-<div class="hint">💡 每行一条内容，提交后会<strong>替换</strong>云端所有旧内容</div>
+<div class="hint">💡 每行一条内容，提交后替换所有旧内容</div>
 <button type="button" id="subBtn" onclick="doSubmit()">📤 提交内容</button>
 <div class="nav"><a href="index.html">← 去展示</a></div>
 </div>
@@ -48,58 +45,41 @@ button:disabled{opacity:.5;cursor:not-allowed}
 var AK='$2a$10$mN/qxmnMyWObfCIw7cZokuvM1jSfeZ7u1zLt8yqTLlaMztS3hsvqm';
 var BIN='6a4490d2da38895dfe198314';
 
-function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.className='sync '+c}
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
 
-function jLoad(){
+// 加载
+function loadComments(){
     return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
     .then(function(r){return r.json()})
-    .then(function(d){
-        if(d.record)return{comments:d.record.comments||[]};
-        return{comments:[]};
-    }).catch(function(){return null});
+    .then(function(d){return(d.record||{}).comments||[]})
+    .catch(function(){return null});
 }
 
-function jSave(data){
-    return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
-        method:'PUT',
-        headers:{'Content-Type':'application/json','X-Master-Key':AK},
-        body:JSON.stringify({comments:data.comments})
-    }).then(function(){return true}).catch(function(){return false});
+// 保存
+function saveComments(arr){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},body:JSON.stringify({comments:arr})})
+    .then(function(){return true}).catch(function(){return false});
 }
 
-function updateCount(){
-    showSync('☁ 读取中...','ld');
-    jLoad().then(function(d){
-        if(!d){showSync('⚠️ 加载失败','');return}
-        var count=(d.comments||[]).length;
-        document.getElementById('cnt').textContent=count+'条';
-        showSync('☁ 已同步','ok');
-    });
-}
+// 更新计数
+loadComments().then(function(c){if(c!==null)document.getElementById('cnt').textContent=c.length});
 
 function doSubmit(){
-    var raw=document.getElementById('inp').value.split('\n');
+    var lines=document.getElementById('inp').value.split('\n');
     var comments=[];
-    for(var i=0;i<raw.length;i++){
-        var t=raw[i].trim();
-        if(t.length>0)comments.push(t.substring(0,500));
-    }
+    for(var i=0;i<lines.length;i++){var t=lines[i].trim();if(t)comments.push(t.substring(0,500))}
     if(comments.length===0){showMsg('❌ 请输入至少一条内容','er');return}
 
     var btn=document.getElementById('subBtn');
     btn.disabled=true;btn.textContent='⏳ 保存中...';
-    showSync('☁ 保存中...','ld');
 
-    jSave({comments:comments}).then(function(ok){
+    saveComments(comments).then(function(ok){
         if(ok){
-            showSync('☁ 已同步','ok');
-            showMsg('✅ 成功提交 '+comments.length+' 条内容！','ok');
+            document.getElementById('cnt').textContent=comments.length;
+            showMsg('✅ 成功提交 '+comments.length+' 条','ok');
             document.getElementById('inp').value='';
             document.getElementById('lc').textContent='0 行';
-            updateCount();
         }else{
-            showSync('⚠️ 失败','');
             showMsg('❌ 保存失败','er');
         }
         btn.disabled=false;btn.textContent='📤 提交内容';
@@ -107,11 +87,9 @@ function doSubmit(){
 }
 
 document.getElementById('inp').addEventListener('input',function(){
-    var lines=this.value.split('\n').filter(function(l){return l.trim()!==''}).length;
-    document.getElementById('lc').textContent=lines+' 行';
+    var n=this.value.split('\n').filter(function(l){return l.trim()}).length;
+    document.getElementById('lc').textContent=n+' 行';
 });
-
-updateCount();
 </script>
 </body>
 </html>
