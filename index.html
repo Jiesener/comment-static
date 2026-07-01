@@ -50,13 +50,14 @@ document.getElementById('info').textContent='📱 '+DEVID;
 function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.className='sync '+c}
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
 function jLoad(){
-    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest?nocache='+Date.now(),{cache:'no-store'})
     .then(function(r){return r.json()})
     .then(function(d){
-        if(d.record)return{comments:d.record.comments||[],assignments:d.record.assignments||{}};
-        return{comments:[],assignments:{}};
+        if(d.record)return d.record;
+        return{comments:[],assignments:{},counter:0};
     }).catch(function(){return null});
 }
 
@@ -64,16 +65,19 @@ function jSave(data){
     return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
         method:'PUT',
         headers:{'Content-Type':'application/json','X-Master-Key':AK},
-        body:JSON.stringify({comments:data.comments,assignments:data.assignments,ts:Date.now()})
+        body:JSON.stringify(data)
     }).then(function(){return true}).catch(function(){return false});
 }
 
 var CUR=null,BUSY=false;
 
-function render(d){
-    if(!d)d={comments:[],assignments:{}};
-    var ac=Object.values(d.assignments||{});
-    document.getElementById('cnt').textContent=(d.comments||[]).filter(function(x){return ac.indexOf(x)<0}).length;
+function render(data){
+    if(!data)data={comments:[],assignments:{},counter:0};
+    var comments=data.comments||[];
+    var counter=data.counter||0;
+    var remaining=comments.length-counter;
+    if(remaining<0)remaining=0;
+    document.getElementById('cnt').textContent=remaining;
     var b=document.getElementById('area');
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
@@ -84,34 +88,46 @@ function render(d){
     }
 }
 
+// 队列分配：每个设备领取队列中的下一条（带重试）
 async function doAssign(){
     showSync('☁ 分配中...','ld');
-    // 随机延迟 100-600ms 减少冲突
-    await new Promise(function(r){setTimeout(r,100+Math.random()*500)});
+    
+    for(var attempt=0;attempt<15;attempt++){
+        var d=await jLoad();
+        if(!d){await sleep(200);continue}
+        if(!d.comments)d.comments=[];
+        if(!d.assignments)d.assignments={};
+        if(d.counter===undefined||d.counter===null)d.counter=0;
 
-    var d=await jLoad();
-    if(!d){showSync('⚠️ 加载失败','');return}
-    var comments=d.comments;
-    var assignments=d.assignments||{};
+        // 检查是否已分配给我
+        var mine=d.assignments[DEVID];
+        if(mine){
+            CUR=mine;render(d);showSync('☁ 已同步','ok');return;
+        }
 
-    // 已分配给我
-    var mine=assignments[DEVID];
-    if(mine&&comments.indexOf(mine)>=0){CUR=mine;render(d);showSync('☁ 已同步','ok');return}
+        // 检查队列是否还有评论
+        if(d.counter>=d.comments.length){
+            CUR=null;render(d);showSync('📭 已用完','ok');return;
+        }
 
-    // 找未分配
-    var ac=Object.values(assignments);
-    var ua=comments.filter(function(x){return ac.indexOf(x)<0});
-    if(ua.length===0){CUR=null;render(d);showSync('📭 已用完','ok');return}
+        // 领取队列中的下一条
+        var pick=d.comments[d.counter];
+        d.assignments[DEVID]=pick;
+        d.counter=d.counter+1;
 
-    // 随机选一条
-    var pick=ua[Math.floor(Math.random()*ua.length)];
-    assignments[DEVID]=pick;
-    CUR=pick;
-    await jSave(d);
-    render(d);
-    showSync('☁ 已同步','ok');
+        // 保存
+        if(await jSave(d)){
+            CUR=pick;render(d);showSync('☁ 已同步','ok');return;
+        }
+
+        // 保存失败（冲突），重试
+        await sleep(50);
+    }
+
+    showSync('⚠️ 分配失败','');
 }
 
+// 复制
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
@@ -126,27 +142,79 @@ async function doCopy(){
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
     showSync('☁ 保存中...','ld');
-    var d=await jLoad();
-    if(d){
+
+    // 删除当前评论+重新分配
+    for(var attempt=0;attempt<15;attempt++){
+        var d=await jLoad();
+        if(!d){await sleep(200);continue}
+        if(!d.comments)d.comments=[];
+        if(!d.assignments)d.assignments={};
+        if(d.counter===undefined||d.counter===null)d.counter=0;
+
+        // 删除当前评论
         var idx=d.comments.indexOf(text);
-        if(idx>=0)d.comments.splice(idx,1);
+        if(idx>=0){
+            d.comments.splice(idx,1);
+            // 如果删除的在counter之前，counter要减1
+            if(idx<d.counter)d.counter=d.counter-1;
+        }
+
+        // 删除旧分配
         delete d.assignments[DEVID];
-        await jSave(d);
+
+        // 领取下一条
+        if(d.counter<d.comments.length){
+            var pick=d.comments[d.counter];
+            d.assignments[DEVID]=pick;
+            d.counter=d.counter+1;
+            CUR=pick;
+        }else{
+            CUR=null;
+        }
+
+        if(await jSave(d)){
+            render(d);showSync(CUR?'☁ 已同步':'📭 已用完','ok');
+            break;
+        }
+        await sleep(50);
     }
-    CUR=null;
-    await doAssign();
+
     BUSY=false;
 }
 
+// 跳过
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
     showSync('☁ 跳过中...','ld');
-    var d=await jLoad();
-    if(d){delete d.assignments[DEVID];await jSave(d)}
-    CUR=null;
-    toast('⏭ 已跳过');
-    await doAssign();
+
+    for(var attempt=0;attempt<15;attempt++){
+        var d=await jLoad();
+        if(!d){await sleep(200);continue}
+        if(!d.comments)d.comments=[];
+        if(!d.assignments)d.assignments={};
+        if(d.counter===undefined||d.counter===null)d.counter=0;
+
+        // 删除分配（不删除评论，只是跳过当前设备的分配）
+        delete d.assignments[DEVID];
+
+        // 领取下一条
+        if(d.counter<d.comments.length){
+            var pick=d.comments[d.counter];
+            d.assignments[DEVID]=pick;
+            d.counter=d.counter+1;
+            CUR=pick;
+        }else{
+            CUR=null;
+        }
+
+        if(await jSave(d)){
+            render(d);toast('⏭ 已跳过');showSync(CUR?'☁ 已同步':'📭 已用完','ok');
+            break;
+        }
+        await sleep(50);
+    }
+
     BUSY=false;
 }
 
@@ -158,11 +226,13 @@ setInterval(async function(){
     var d=await jLoad();
     if(!d)return;
     var mine=d.assignments?d.assignments[DEVID]:null;
-    if(mine&&d.comments&&d.comments.indexOf(mine)>=0){
+    if(mine){
         if(mine!==CUR){CUR=mine;render(d);showSync('☁ 已同步','ok')}
     }else if(!CUR){
-        render(d);
+        // 没有分配，自动领取
+        doAssign();
     }
+    render(d);
 },3000);
 </script>
 </body>
