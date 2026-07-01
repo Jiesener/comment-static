@@ -39,8 +39,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <div class="nav"><a href="submit.html">去提交内容 →</a></div>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 var FB_URL='https://comment-app-5a494-default-rtdb.firebaseio.com';
 var DK='plzs_device_id';
@@ -53,9 +51,23 @@ function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.c
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 
-// 初始化Firebase
-firebase.initializeApp({databaseURL:FB_URL});
-var db=firebase.database();
+// Firebase REST API（比SDK更快）
+function fbLoad(){
+    return fetch(FB_URL+'/data.json?nocache='+Date.now(),{cache:'no-store'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+        if(!d)return{comments:[],assignments:{}};
+        return{comments:d.comments||[],assignments:d.assignments||{}};
+    }).catch(function(){return null});
+}
+
+function fbSave(data){
+    return fetch(FB_URL+'/data.json',{
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(data)
+    }).then(function(){return true}).catch(function(){return false});
+}
 
 var DATA=null,CUR=null,BUSY=false;
 
@@ -74,83 +86,120 @@ function render(){
     }
 }
 
-// 实时监听数据变化（核心！）
-db.ref('data').on('value',function(snap){
-    var val=snap.val();
-    if(!val)return;
-    DATA={comments:val.comments||[],assignments:val.assignments||{}};
-    
-    // 检查我的分配
-    var mine=DATA.assignments?DATA.assignments[DEVID]:null;
-    if(mine&&DATA.comments&&DATA.comments.indexOf(mine)>=0){
-        if(mine!==CUR){CUR=mine;render();showSync('☁ 已同步','ok')}
-    }else if(!CUR){
-        // 没有分配，自动分配一条
-        var ac=Object.values(DATA.assignments||{});
-        var ua=(DATA.comments||[]).filter(function(x){return ac.indexOf(x)<0});
-        if(ua.length>0){
-            // 立即分配（不等待）
-            var pick=ua[Math.floor(Math.random()*ua.length)];
-            db.ref('data/assignments/'+DEVID).set(pick);
-            CUR=pick;render();showSync('☁ 已分配','ok');
-        }
+// 分配评论
+async function assign(){
+    showSync('☁ 分配中...','ld');
+    var d=await fbLoad();
+    if(!d){showSync('⚠️ 加载失败','');return}
+    DATA=d;
+
+    var comments=DATA.comments||[];
+    var assignments=DATA.assignments||{};
+
+    // 检查是否已分配给我
+    var mine=assignments[DEVID];
+    if(mine&&comments.indexOf(mine)>=0){
+        CUR=mine;render();showSync('☁ 已同步','ok');return;
     }
+
+    // 找未分配的
+    var ac=Object.values(assignments);
+    var ua=comments.filter(function(x){return ac.indexOf(x)<0});
+
+    if(ua.length===0){CUR=null;render();showSync('📭 已用完','ok');return}
+
+    // 随机选一条
+    var pick=ua[Math.floor(Math.random()*ua.length)];
+    DATA.assignments[DEVID]=pick;
+    await fbSave(DATA);
+
+    CUR=pick;
+    render();
     showSync('☁ 已同步','ok');
-});
+}
 
 // 复制
-function doCopy(){
+async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
     var btn=document.getElementById('copyBtn');
     if(btn)btn.disabled=true;
 
     var text=CUR;
+    
+    // 复制到剪贴板
     try{
         if(navigator.clipboard&&navigator.clipboard.writeText){
-            navigator.clipboard.writeText(text).then(function(){afterCopy()});
+            await navigator.clipboard.writeText(text);
         }else{
             var ta=document.getElementById('ta');
-            if(ta){ta.select();document.execCommand('copy');afterCopy()}
+            if(ta){ta.select();document.execCommand('copy')}
         }
         toast('✅ 已复制！');
     }catch(e){
         toast('⚠️ 复制失败');
-        BUSY=false;if(btn)btn.disabled=false;
+        BUSY=false;if(btn)btn.disabled=false;return;
     }
-    
-    function afterCopy(){
-        // 立即从云端删除
-        showSync('☁ 保存中...','ld');
-        var idx=DATA.comments.indexOf(text);
-        if(idx>=0){
-            var newComments=DATA.comments.slice();
-            newComments.splice(idx,1);
-            // 删除分配并更新评论
-            var updates={};
-            updates['/comments']=newComments;
-            updates['/assignments/'+DEVID]=null;
-            db.ref('data').update(updates);
-        }
-        CUR=null;
-        // 不需要手动assign，实时监听会自动处理
-        BUSY=false;
-    }
-}
 
-// 跳过
-function doSkip(){
-    if(BUSY)return;
-    BUSY=true;
-    showSync('☁ 跳过中...','ld');
-    db.ref('data/assignments/'+DEVID).remove();
+    // 从云端删除这条评论
+    showSync('☁ 保存中...','ld');
+    var d=await fbLoad();
+    if(d){
+        DATA=d;
+        var idx=DATA.comments.indexOf(text);
+        if(idx>=0)DATA.comments.splice(idx,1);
+        delete DATA.assignments[DEVID];
+        await fbSave(DATA);
+    }
+
     CUR=null;
-    toast('⏭ 已跳过');
-    // 不需要手动assign，实时监听会自动处理
+    // 重新分配
+    await assign();
     BUSY=false;
 }
 
-showSync('☁ 连接中...','ld');
+// 跳过
+async function doSkip(){
+    if(BUSY)return;
+    BUSY=true;
+    showSync('☁ 跳过中...','ld');
+    var d=await fbLoad();
+    if(d){
+        DATA=d;
+        delete DATA.assignments[DEVID];
+        await fbSave(DATA);
+    }
+    CUR=null;
+    toast('⏭ 已跳过');
+    // 重新分配
+    await assign();
+    BUSY=false;
+}
+
+// 启动
+assign();
+
+// 每2秒轮询同步
+setInterval(async function(){
+    if(BUSY)return;
+    var d=await fbLoad();
+    if(!d)return;
+    var mine=d.assignments?d.assignments[DEVID]:null;
+    if(mine&&d.comments&&d.comments.indexOf(mine)>=0){
+        if(mine!==CUR){DATA=d;CUR=mine;render();showSync('☁ 已同步','ok')}
+    }else if(!CUR){
+        DATA=d;
+        var ac=Object.values(d.assignments||{});
+        var ua=(d.comments||[]).filter(function(x){return ac.indexOf(x)<0});
+        if(ua.length>0){
+            CUR=ua[0];
+            d.assignments[DEVID]=CUR;
+            fbSave(d);
+            render();
+            showSync('☁ 已同步','ok');
+        }
+    }
+},2000);
 </script>
 </body>
 </html>
