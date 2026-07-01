@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>评论展示</title>
+<title>评论展示 v3</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
@@ -28,7 +28,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <div class="box">
 <h1>📋 评论展示</h1>
 <div class="badge">📌 剩余 <strong id="cnt">0</strong> 条</div>
-<div id="area"><div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>正在加载...</p></div></div>
+<div id="area"><div class="empty"><div style="font-size:48px">📭</div><p id="status">连接中...</p></div></div>
 <div class="nav"><a href="submit.html">去提交内容 →</a></div>
 </div>
 
@@ -38,26 +38,25 @@ var BIN='6a4490d2da38895dfe198314';
 
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function stat(s){document.getElementById('status').textContent=s}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-// 加载（与submit页面完全相同）
-function loadComments(){
-    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
+function load(){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest?nocache='+Date.now(),{headers:{'X-Master-Key':AK}})
     .then(function(r){return r.json()})
     .then(function(d){return(d.record||{}).comments||[]})
-    .catch(function(){return null});
+    .catch(function(e){console.error('Load error:',e);return null});
 }
 
-// 保存（与submit页面完全相同）
-function saveComments(arr){
+function save(arr){
     return fetch('https://api.jsonbin.io/v3/b/'+BIN,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},body:JSON.stringify({comments:arr})})
-    .then(function(){return true}).catch(function(){return false});
+    .then(function(){return true}).catch(function(e){console.error('Save error:',e);return false});
 }
 
 var CUR=null,BUSY=false;
 
-function render(remaining){
-    document.getElementById('cnt').textContent=remaining||0;
+function render(r){
+    document.getElementById('cnt').textContent=r||0;
     var b=document.getElementById('area');
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
@@ -68,23 +67,28 @@ function render(remaining){
     }
 }
 
-// 随机取一条（带重试）
-async function pickOne(){
+async function pick(){
+    stat('加载数据...');
+    
     for(var i=0;i<20;i++){
-        var comments=await loadComments();
-        if(comments===null){await sleep(200);continue}
-        if(comments.length===0){CUR=null;render(0);return false}
+        var comments=await load();
+        stat('加载完成: '+((comments||[]).length)+' 条');
+        
+        if(comments===null){stat('加载失败,重试('+i+')');await sleep(300);continue}
+        if(comments.length===0){stat('没有评论了');CUR=null;render(0);return}
 
         var idx=Math.floor(Math.random()*comments.length);
         var picked=comments[idx];
         comments.splice(idx,1);
 
-        if(await saveComments(comments)){
-            CUR=picked;render(comments.length);return true;
+        stat('保存中...');
+        if(await save(comments)){
+            stat('已分配');
+            CUR=picked;render(comments.length);return;
         }
-        await sleep(50);
+        stat('保存冲突,重试');await sleep(50);
     }
-    CUR=null;render(0);return false;
+    stat('分配失败');CUR=null;render(0);
 }
 
 async function doCopy(){
@@ -100,7 +104,7 @@ async function doCopy(){
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
-    await pickOne();
+    await pick();
     BUSY=false;
 }
 
@@ -109,7 +113,7 @@ async function doSkip(){
     BUSY=true;
 
     for(var i=0;i<10;i++){
-        var comments=await loadComments();
+        var comments=await load();
         if(comments===null){await sleep(200);continue}
 
         comments.push(CUR);
@@ -117,16 +121,13 @@ async function doSkip(){
         var picked=comments[idx];
         comments.splice(idx,1);
 
-        if(await saveComments(comments)){
-            CUR=picked;render(comments.length);break;
-        }
+        if(await save(comments)){CUR=picked;render(comments.length);break}
         await sleep(50);
     }
-    toast('⏭ 已跳过');
-    BUSY=false;
+    toast('⏭ 已跳过');BUSY=false;
 }
 
-pickOne();
+pick();
 </script>
 </body>
 </html>
