@@ -41,7 +41,7 @@ function esc(s){var d=document.createElement('div');d.textContent=s||'';return d
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
 function load(){
-    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest?nocache='+Date.now(),{cache:'no-store'})
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
     .then(function(r){return r.json()})
     .then(function(d){return(d.record||{}).comments||[]})
     .catch(function(){return null});
