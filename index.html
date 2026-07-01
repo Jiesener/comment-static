@@ -28,68 +28,59 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <div class="box">
 <h1>📋 评论展示</h1>
 <div class="badge">📌 剩余 <strong id="cnt">0</strong> 条</div>
-<div id="area"><div class="empty"><div style="font-size:48px">📭</div><p id="status">连接中...</p></div></div>
+<div id="area"><div class="empty"><div style="font-size:48px">📭</div><p>加载中...</p></div></div>
 <div class="nav"><a href="submit.html">去提交内容 →</a></div>
 </div>
 
 <script>
-var URL='https://dkyqhqiggavtsxjaxl.supabase.co';
-var KEY='sb_publishable_6bLIRB6nvWkzlLarnQcebw_DU11syVo';
-var H={apikey:KEY,Authorization:'Bearer '+KEY};
+var AK='$2a$10$mN/qxmnMyWObfCIw7cZokuvM1jSfeZ7u1zLt8yqTLlaMztS3hsvqm';
+var BIN='6a4490d2da38895dfe198314';
 
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function stat(s){document.getElementById('status').textContent=s}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-// 加载所有评论（带 id）
-function loadAll(){
-    return fetch(URL+'/rest/v1/comments?select=id,text&order=id',{headers:H})
+function load(){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest?nocache='+Date.now(),{cache:'no-store'})
     .then(function(r){return r.json()})
-    .catch(function(e){console.error('load error:',e);return null});
+    .then(function(d){return(d.record||{}).comments||[]})
+    .catch(function(){return null});
 }
 
-// 删除一条（按 id）
-function delById(id){
-    return fetch(URL+'/rest/v1/comments?id=eq.'+id,{method:'DELETE',headers:H})
-    .then(function(){return true}).catch(function(e){console.error('del error:',e);return false});
-}
-
-// 新增一条
-function addOne(text){
-    return fetch(URL+'/rest/v1/comments',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify({text:text})})
-    .then(function(){return true}).catch(function(){return false});
+function save(arr){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
+        method:'PUT',
+        headers:{'Content-Type':'application/json','X-Master-Key':AK},
+        body:JSON.stringify({comments:arr})
+    }).then(function(){return true}).catch(function(){return false});
 }
 
 var CUR=null,BUSY=false;
 
-function render(remaining){
-    document.getElementById('cnt').textContent=remaining||0;
+function render(r){
+    document.getElementById('cnt').textContent=r||0;
     var b=document.getElementById('area');
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
     }else{
-        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR.text)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
+        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
         document.getElementById('copyBtn').onclick=doCopy;
         document.getElementById('skipBtn').onclick=doSkip;
     }
 }
 
-async function pickOne(){
-    stat('加载中...');
+async function pick(){
     for(var i=0;i<20;i++){
-        var rows=await loadAll();
-        if(rows===null){stat('加载失败,重试');await sleep(300);continue}
-        if(rows.length===0){stat('没有评论了');CUR=null;render(0);return}
-        stat('共 '+rows.length+' 条');
+        var arr=await load();
+        if(arr===null){await sleep(200);continue}
+        if(arr.length===0){CUR=null;render(0);return}
 
-        var idx=Math.floor(Math.random()*rows.length);
-        var chosen=rows[idx];
+        var idx=Math.floor(Math.random()*arr.length);
+        var picked=arr[idx];
+        arr.splice(idx,1);
 
-        // 从数据库删除
-        if(!(await delById(chosen.id))){stat('删除失败,重试');await sleep(100);continue}
-
-        CUR=chosen;render(rows.length-1);return;
+        if(await save(arr)){CUR=picked;render(arr.length);return}
+        await sleep(50);
     }
     CUR=null;render(0);
 }
@@ -99,32 +90,32 @@ async function doCopy(){
     BUSY=true;
     var btn=document.getElementById('copyBtn');
     if(btn)btn.disabled=true;
-
     try{
-        if(navigator.clipboard&&navigator.clipboard.writeText){
-            await navigator.clipboard.writeText(CUR.text);
-        }else{
-            var ta=document.getElementById('ta');
-            if(ta){ta.select();document.execCommand('copy')}
-        }
+        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR)}
+        else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
-
-    await pickOne();
+    await pick();
     BUSY=false;
 }
 
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-    // 把跳过的放回去
-    await addOne(CUR.text);
-    await pickOne();
-    toast('⏭ 已跳过');
-    BUSY=false;
+    for(var i=0;i<10;i++){
+        var arr=await load();
+        if(arr===null){await sleep(200);continue}
+        arr.push(CUR);
+        var idx=Math.floor(Math.random()*(arr.length-1));
+        var picked=arr[idx];
+        arr.splice(idx,1);
+        if(await save(arr)){CUR=picked;render(arr.length);break}
+        await sleep(50);
+    }
+    toast('⏭ 已跳过');BUSY=false;
 }
 
-pickOne();
+pick();
 </script>
 </body>
 </html>
