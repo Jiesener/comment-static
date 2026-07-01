@@ -64,7 +64,7 @@ function jSave(data){
     return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
         method:'PUT',
         headers:{'Content-Type':'application/json','X-Master-Key':AK},
-        body:JSON.stringify({comments:data.comments,assignments:data.assignments,ts:Date.now()})
+        body:JSON.stringify({comments:data.comments,assignments:data.assignments,counter:data.counter||0,ts:Date.now()})
     }).then(function(){return true}).catch(function(){return false});
 }
 
