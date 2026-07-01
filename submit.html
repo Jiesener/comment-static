@@ -42,30 +42,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <script>
-var URL='https://dkyqhqiggavtsxjaxl.supabase.co';
-var KEY='sb_publishable_6bLIRB6nvWkzlLarnQcebw_DU11syVo';
-var H={apikey:KEY,Authorization:'Bearer '+KEY,'Content-Type':'application/json',Prefer:'return=minimal'};
+var AK='$2a$10$mN/qxmnMyWObfCIw7cZokuvM1jSfeZ7u1zLt8yqTLlaMztS3hsvqm';
+var BIN='6a4490d2da38895dfe198314';
 
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
 
-function getCount(){
-    return fetch(URL+'/rest/v1/comments?select=id',{headers:H,method:'HEAD'})
-    .then(function(r){return parseInt(r.headers.get('content-range').split('/')[1]||'0')})
-    .catch(function(){return 0});
-}
-
-function delAll(){
-    return fetch(URL+'/rest/v1/comments?id=gt.0',{method:'DELETE',headers:H})
+function save(arr){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':AK},body:JSON.stringify({comments:arr})})
     .then(function(){return true}).catch(function(){return false});
 }
 
-function addBatch(arr){
-    var rows=arr.map(function(t){return{text:t}});
-    return fetch(URL+'/rest/v1/comments',{method:'POST',headers:H,body:JSON.stringify(rows)})
-    .then(function(){return true}).catch(function(){return false});
-}
-
-getCount().then(function(n){document.getElementById('cnt').textContent=n});
+fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
+  .then(function(r){return r.json()})
+  .then(function(d){document.getElementById('cnt').textContent=(d.record||{}).comments?.length||0});
 
 function doSubmit(){
     var lines=document.getElementById('inp').value.split('\n');
@@ -74,16 +63,14 @@ function doSubmit(){
     if(arr.length===0){showMsg('❌ 请输入至少一条内容','er');return}
     var btn=document.getElementById('subBtn');
     btn.disabled=true;btn.textContent='⏳ 保存中...';
-    delAll().then(function(){
-        addBatch(arr).then(function(ok){
-            if(ok){
-                document.getElementById('cnt').textContent=arr.length;
-                showMsg('✅ 成功提交 '+arr.length+' 条','ok');
-                document.getElementById('inp').value='';
-                document.getElementById('lc').textContent='0 行';
-            }else{showMsg('❌ 保存失败','er')}
-            btn.disabled=false;btn.textContent='📤 提交内容';
-        });
+    save(arr).then(function(ok){
+        if(ok){
+            document.getElementById('cnt').textContent=arr.length;
+            showMsg('✅ 成功提交 '+arr.length+' 条','ok');
+            document.getElementById('inp').value='';
+            document.getElementById('lc').textContent='0 行';
+        }else{showMsg('❌ 保存失败','er')}
+        btn.disabled=false;btn.textContent='📤 提交内容';
     });
 }
 
