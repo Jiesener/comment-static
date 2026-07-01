@@ -35,22 +35,29 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <script>
 var URL='https://dkyqhqiggavtsxjaxl.supabase.co';
 var KEY='sb_publishable_6bLIRB6nvWkzlLarnQcebw_DU11syVo';
-var H={apikey:KEY,Authorization:'Bearer '+KEY,'Content-Type':'application/json'};
+var H={apikey:KEY,Authorization:'Bearer '+KEY};
 
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function stat(s){document.getElementById('status').textContent=s}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-function load(){
-    return fetch(URL+'/rest/v1/comments?select=text&order=id',{headers:H})
+// 加载所有评论（带 id）
+function loadAll(){
+    return fetch(URL+'/rest/v1/comments?select=id,text&order=id',{headers:H})
     .then(function(r){return r.json()})
-    .then(function(arr){return arr.map(function(x){return x.text})})
-    .catch(function(e){console.error(e);return null});
+    .catch(function(e){console.error('load error:',e);return null});
 }
 
-function delOne(text){
-    return fetch(URL+'/rest/v1/comments?text=eq.'+encodeURIComponent(text),{method:'DELETE',headers:H})
+// 删除一条（按 id）
+function delById(id){
+    return fetch(URL+'/rest/v1/comments?id=eq.'+id,{method:'DELETE',headers:H})
+    .then(function(){return true}).catch(function(e){console.error('del error:',e);return false});
+}
+
+// 新增一条
+function addOne(text){
+    return fetch(URL+'/rest/v1/comments',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify({text:text})})
     .then(function(){return true}).catch(function(){return false});
 }
 
@@ -62,25 +69,27 @@ function render(remaining){
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
     }else{
-        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
+        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR.text)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
         document.getElementById('copyBtn').onclick=doCopy;
         document.getElementById('skipBtn').onclick=doSkip;
     }
 }
 
-async function pick(){
-    stat('加载数据...');
+async function pickOne(){
+    stat('加载中...');
     for(var i=0;i<20;i++){
-        var comments=await load();
-        if(comments===null){stat('加载失败,重试('+i+')');await sleep(300);continue}
-        if(comments.length===0){stat('没有评论了');CUR=null;render(0);return}
-        stat('加载完成: '+comments.length+' 条');
-        var idx=Math.floor(Math.random()*comments.length);
-        var picked=comments[idx];
-        if(await delOne(picked)){
-            CUR=picked;render(comments.length-1);return;
-        }
-        stat('删除冲突,重试');await sleep(50);
+        var rows=await loadAll();
+        if(rows===null){stat('加载失败,重试');await sleep(300);continue}
+        if(rows.length===0){stat('没有评论了');CUR=null;render(0);return}
+        stat('共 '+rows.length+' 条');
+
+        var idx=Math.floor(Math.random()*rows.length);
+        var chosen=rows[idx];
+
+        // 从数据库删除
+        if(!(await delById(chosen.id))){stat('删除失败,重试');await sleep(100);continue}
+
+        CUR=chosen;render(rows.length-1);return;
     }
     CUR=null;render(0);
 }
@@ -90,29 +99,32 @@ async function doCopy(){
     BUSY=true;
     var btn=document.getElementById('copyBtn');
     if(btn)btn.disabled=true;
-    var text=CUR;
+
     try{
-        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(text)}
-        else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+            await navigator.clipboard.writeText(CUR.text);
+        }else{
+            var ta=document.getElementById('ta');
+            if(ta){ta.select();document.execCommand('copy')}
+        }
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
-    await pick();
+
+    await pickOne();
     BUSY=false;
 }
 
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-    var text=CUR;
-    if(await delOne(text)){
-        await fetch(URL+'/rest/v1/comments',{method:'POST',headers:H,body:JSON.stringify({text:text})});
-    }
-    await pick();
+    // 把跳过的放回去
+    await addOne(CUR.text);
+    await pickOne();
     toast('⏭ 已跳过');
     BUSY=false;
 }
 
-pick();
+pickOne();
 </script>
 </body>
 </html>
