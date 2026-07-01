@@ -40,7 +40,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 </div>
 
 <script>
-var FB='https://comment-app-5a494-default-rtdb.firebaseio.com/data';
+var AK='$2a$10$mN/qxmnMyWObfCIw7cZokuvM1jSfeZ7u1zLt8yqTLlaMztS3hsvqm';
+var BIN='6a4490d2da38895dfe198314';
 var DK='plzs_device_id';
 var DEVID=localStorage.getItem(DK);
 if(!DEVID){DEVID='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,DEVID)}
@@ -50,7 +51,24 @@ function showSync(t,c){var e=document.getElementById('sync');e.textContent=t;e.c
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 
-var CUR=null,BUSY=false,etag=null;
+function jLoad(){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
+    .then(function(r){return r.json()})
+    .then(function(d){
+        if(d.record)return{comments:d.record.comments||[],assignments:d.record.assignments||{}};
+        return{comments:[],assignments:{}};
+    }).catch(function(){return null});
+}
+
+function jSave(data){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
+        method:'PUT',
+        headers:{'Content-Type':'application/json','X-Master-Key':AK},
+        body:JSON.stringify({comments:data.comments,assignments:data.assignments,ts:Date.now()})
+    }).then(function(){return true}).catch(function(){return false});
+}
+
+var CUR=null,BUSY=false;
 
 function render(d){
     if(!d)d={comments:[],assignments:{}};
@@ -66,65 +84,34 @@ function render(d){
     }
 }
 
-// REST API 乐观锁（用ETag实现事务）
-async function tx(modifyFn){
-    for(var i=0;i<10;i++){
-        // 1. GET（带ETag）
-        var resp=await fetch(FB+'.json',{headers:etag?{'X-Firebase-ETag':etag}:{}});
-        if(!resp.ok){await new Promise(function(r){setTimeout(r,100)});continue}
-        etag=resp.headers.get('ETag');
-        var data=await resp.json();
-        if(!data)data={comments:[],assignments:{}};
-
-        // 2. 本地修改
-        var result=modifyFn(data);
-        if(result===false)return null;
-
-        // 3. PUT（带If-Match条件）
-        var putResp=await fetch(FB+'.json',{
-            method:'PUT',
-            headers:{'Content-Type':'application/json','X-Firebase-ETag':etag},
-            body:JSON.stringify(result)
-        });
-
-        // 4. 成功返回
-        if(putResp.ok){
-            etag=putResp.headers.get('ETag');
-            return result;
-        }
-
-        // 5. 409冲突，重试
-        await new Promise(function(r){setTimeout(r,50)});
-    }
-    return null;
-}
-
-// 分配
 async function doAssign(){
     showSync('☁ 分配中...','ld');
-    var data=await tx(function(d){
-        if(!d.comments)d.comments=[];
-        if(!d.assignments)d.assignments={};
+    // 随机延迟 100-600ms 减少冲突
+    await new Promise(function(r){setTimeout(r,100+Math.random()*500)});
 
-        // 已分配
-        var mine=d.assignments[DEVID];
-        if(mine&&d.comments.indexOf(mine)>=0){CUR=mine;return d}
+    var d=await jLoad();
+    if(!d){showSync('⚠️ 加载失败','');return}
+    var comments=d.comments;
+    var assignments=d.assignments||{};
 
-        // 找未分配
-        var ac=Object.values(d.assignments);
-        var ua=d.comments.filter(function(x){return ac.indexOf(x)<0});
-        if(ua.length===0){CUR=null;return d}
+    // 已分配给我
+    var mine=assignments[DEVID];
+    if(mine&&comments.indexOf(mine)>=0){CUR=mine;render(d);showSync('☁ 已同步','ok');return}
 
-        var pick=ua[Math.floor(Math.random()*ua.length)];
-        d.assignments[DEVID]=pick;
-        CUR=pick;
-        return d;
-    });
-    render(data);
-    showSync(CUR?'☁ 已同步':'📭 已用完','ok');
+    // 找未分配
+    var ac=Object.values(assignments);
+    var ua=comments.filter(function(x){return ac.indexOf(x)<0});
+    if(ua.length===0){CUR=null;render(d);showSync('📭 已用完','ok');return}
+
+    // 随机选一条
+    var pick=ua[Math.floor(Math.random()*ua.length)];
+    assignments[DEVID]=pick;
+    CUR=pick;
+    await jSave(d);
+    render(d);
+    showSync('☁ 已同步','ok');
 }
 
-// 复制
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
@@ -132,71 +119,43 @@ async function doCopy(){
     if(btn)btn.disabled=true;
     var text=CUR;
 
-    // 复制
     try{
-        if(navigator.clipboard&&navigator.clipboard.writeText){
-            await navigator.clipboard.writeText(text);
-        }else{
-            var ta=document.getElementById('ta');
-            if(ta){ta.select();document.execCommand('copy')}
-        }
+        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(text)}
+        else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
-    }catch(e){
-        toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return;
-    }
+    }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
     showSync('☁ 保存中...','ld');
-    // 删除+重新分配（原子操作）
-    var data=await tx(function(d){
-        if(!d.comments)d.comments=[];
-        if(!d.assignments)d.assignments={};
-        // 删除当前评论
+    var d=await jLoad();
+    if(d){
         var idx=d.comments.indexOf(text);
         if(idx>=0)d.comments.splice(idx,1);
-        // 删除旧分配
         delete d.assignments[DEVID];
-        // 分配下一条
-        var ac=Object.values(d.assignments);
-        var ua=d.comments.filter(function(x){return ac.indexOf(x)<0});
-        if(ua.length>0){var p=ua[Math.floor(Math.random()*ua.length)];d.assignments[DEVID]=p;CUR=p}
-        else{CUR=null}
-        return d;
-    });
-    render(data);
-    showSync(CUR?'☁ 已同步':'📭 已用完','ok');
+        await jSave(d);
+    }
+    CUR=null;
+    await doAssign();
     BUSY=false;
 }
 
-// 跳过
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
     showSync('☁ 跳过中...','ld');
-    var data=await tx(function(d){
-        if(!d.comments)d.comments=[];
-        if(!d.assignments)d.assignments={};
-        delete d.assignments[DEVID];
-        var ac=Object.values(d.assignments);
-        var ua=d.comments.filter(function(x){return ac.indexOf(x)<0});
-        if(ua.length>0){var p=ua[Math.floor(Math.random()*ua.length)];d.assignments[DEVID]=p;CUR=p}
-        else{CUR=null}
-        return d;
-    });
-    render(data);
+    var d=await jLoad();
+    if(d){delete d.assignments[DEVID];await jSave(d)}
+    CUR=null;
     toast('⏭ 已跳过');
-    showSync(CUR?'☁ 已同步':'📭 已用完','ok');
+    await doAssign();
     BUSY=false;
 }
 
-// 启动（无SDK，秒开）
 doAssign();
 
-// 轮询同步（2秒）
+// 3秒轮询
 setInterval(async function(){
     if(BUSY)return;
-    var resp=await fetch(FB+'.json',{cache:'no-store'});
-    if(!resp.ok)return;
-    var d=await resp.json();
+    var d=await jLoad();
     if(!d)return;
     var mine=d.assignments?d.assignments[DEVID]:null;
     if(mine&&d.comments&&d.comments.indexOf(mine)>=0){
@@ -204,7 +163,7 @@ setInterval(async function(){
     }else if(!CUR){
         render(d);
     }
-},2000);
+},3000);
 </script>
 </body>
 </html>
