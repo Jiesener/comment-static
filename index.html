@@ -55,7 +55,7 @@ function save(arr){
     }).then(function(){return true}).catch(function(){return false});
 }
 
-var CUR=null,BUSY=false;
+var CUR=null,BUSY=false,IDX=-1;
 
 function render(r){
     document.getElementById('cnt').textContent=r||0;
@@ -69,22 +69,23 @@ function render(r){
     }
 }
 
+// 加载并随机选一条显示（不删除）
 async function pick(){
     for(var i=0;i<20;i++){
         var arr=await load();
         if(arr===null){await sleep(200);continue}
-        if(arr.length===0){CUR=null;render(0);return}
+        if(arr.length===0){CUR=null;IDX=-1;render(0);return}
 
         var idx=Math.floor(Math.random()*arr.length);
-        var picked=arr[idx];
-        arr.splice(idx,1);
-
-        if(await save(arr)){CUR=picked;render(arr.length);return}
-        await sleep(50);
+        CUR=arr[idx];
+        IDX=idx;
+        render(arr.length);
+        return;
     }
-    CUR=null;render(0);
+    CUR=null;IDX=-1;render(0);
 }
 
+// 复制后才删除
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
@@ -95,24 +96,32 @@ async function doCopy(){
         else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
-    await pick();
+
+    // 复制成功后，从数据库删除这条评论
+    var arr=await load();
+    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
+        arr.splice(IDX,1);
+        await save(arr);
+    }
+
     BUSY=false;
+    CUR=null;IDX=-1;
+    setTimeout(function(){pick()},300);
 }
 
+// 跳过：删除当前评论，重新选一条
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-    for(var i=0;i<10;i++){
-        var arr=await load();
-        if(arr===null){await sleep(200);continue}
-        arr.push(CUR);
-        var idx=Math.floor(Math.random()*(arr.length-1));
-        var picked=arr[idx];
-        arr.splice(idx,1);
-        if(await save(arr)){CUR=picked;render(arr.length);break}
-        await sleep(50);
+    var arr=await load();
+    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
+        arr.splice(IDX,1);
+        await save(arr);
     }
-    toast('⏭ 已跳过');BUSY=false;
+    CUR=null;IDX=-1;
+    toast('⏭ 已跳过');
+    await pick();
+    BUSY=false;
 }
 
 pick();
