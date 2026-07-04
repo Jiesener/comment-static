@@ -32,17 +32,28 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <div class="nav"><a href="submit.html">去提交内容 →</a></div>
 </div>
 
-<script>
-var URL='https://dkyqhqiggavtsxjaxl.supabase.co';
-var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRreXFoaWdndGF2dHN4amFseG9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MTc0OTgsImV4cCI6MjA5ODQ5MzQ5OH0.ohg1tOTlAMSxcOYUQAiNHE-wA8YQzrDTdkCFTDVFOXo';
-var H={apikey:KEY,Authorization:'Bearer '+KEY};
+<script>/* v2.1 - delete only after copy */
+var AK='$2a$10$mN/qxmnMyWObfCIw7cZokuvM1jSfeZ7u1zLt8yqTLlaMztS3hsvqm';
+var BIN='6a4490d2da38895dfe198314';
 
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-function load(){return fetch(URL+'/rest/v1/comments?select=id,text&order=id',{headers:H}).then(function(r){return r.json()}).then(function(arr){return arr.map(function(x){return{x:id:x.id,text:x.text}})}).catch(function(){return null})}
-function delById(id){return fetch(URL+'/rest/v1/comments?id=eq.'+id,{method:'DELETE',headers:H}).then(function(){return true}).catch(function(){return false})}
+function load(){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN+'/latest',{headers:{'X-Master-Key':AK}})
+    .then(function(r){return r.json()})
+    .then(function(d){return(d.record||{}).comments||[]})
+    .catch(function(){return null});
+}
+
+function save(arr){
+    return fetch('https://api.jsonbin.io/v3/b/'+BIN,{
+        method:'PUT',
+        headers:{'Content-Type':'application/json','X-Master-Key':AK},
+        body:JSON.stringify({comments:arr})
+    }).then(function(){return true}).catch(function(){return false});
+}
 
 var CUR=null,BUSY=false,IDX=-1;
 
@@ -52,17 +63,19 @@ function render(r){
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
     }else{
-        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR.text)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
+        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
         document.getElementById('copyBtn').onclick=doCopy;
         document.getElementById('skipBtn').onclick=doSkip;
     }
 }
 
+// 加载并随机选一条显示（不删除）
 async function pick(){
     for(var i=0;i<20;i++){
         var arr=await load();
         if(arr===null){await sleep(200);continue}
         if(arr.length===0){CUR=null;IDX=-1;render(0);return}
+
         var idx=Math.floor(Math.random()*arr.length);
         CUR=arr[idx];
         IDX=idx;
@@ -72,26 +85,39 @@ async function pick(){
     CUR=null;IDX=-1;render(0);
 }
 
+// 复制后才删除
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
     var btn=document.getElementById('copyBtn');
     if(btn)btn.disabled=true;
     try{
-        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR.text)}
+        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR)}
         else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
-    await delById(CUR.id);
+
+    // 复制成功后，从数据库删除这条评论
+    var arr=await load();
+    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
+        arr.splice(IDX,1);
+        await save(arr);
+    }
+
     BUSY=false;
     CUR=null;IDX=-1;
     setTimeout(function(){pick()},300);
 }
 
+// 跳过：删除当前评论，重新选一条
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-    await delById(CUR.id);
+    var arr=await load();
+    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
+        arr.splice(IDX,1);
+        await save(arr);
+    }
     CUR=null;IDX=-1;
     toast('⏭ 已跳过');
     await pick();
