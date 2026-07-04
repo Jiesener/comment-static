@@ -9,6 +9,7 @@
 body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
 .box{background:#fff;padding:30px 24px;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:500px;width:100%;text-align:center}
 h1{color:#333;margin-bottom:12px;font-size:22px}
+.info{font-size:12px;color:#aaa;margin-bottom:16px}
 .badge{display:inline-block;background:rgba(102,126,234,.12);color:#667eea;font-size:13px;padding:4px 14px;border-radius:20px;margin-bottom:20px;font-weight:600}
 textarea{width:100%;min-height:120px;padding:15px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;line-height:1.6;resize:none;margin-bottom:16px;font-family:inherit}
 .btns{display:flex;gap:10px}
@@ -27,6 +28,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 <div class="toast" id="toast"></div>
 <div class="box">
 <h1>📋 评论展示</h1>
+<div class="info" id="info"></div>
 <div class="badge">📌 剩余 <strong id="cnt">0</strong> 条</div>
 <div id="area"><div class="empty"><div style="font-size:48px">📭</div><p>加载中...</p></div></div>
 <div class="nav"><a href="submit.html">去提交内容 →</a></div>
@@ -37,56 +39,56 @@ var TOKEN=['github_pat_11ARP77YI0','k8RWakgd5Mtt_nK97kftwfqKEMd0XnGm93GLZiKllBk4
 var REPO='Jiesener/comment-static';
 var FILE='data.json';
 
+// 生成设备唯一 ID
+var DK='plzs_device_id';
+var DEVID=localStorage.getItem(DK);
+if(!DEVID){DEVID='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,DEVID)}
+document.getElementById('info').textContent='📱 '+DEVID;
+
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-// 读取（GitHub API）
-async function load(){
+// 加载完整数据（comments + assignments）
+async function loadAll(){
     try{
-        const r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        var r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
         });
-        if(!r.ok)return[];
-        const d=await r.json();
-        if(!d.content)return[];
-        const decoded=decodeURIComponent(escape(atob(d.content)));
-        const obj=JSON.parse(decoded);
-        return obj.comments||[];
-    }catch(e){
-        console.error('load error:',e);
-        return [];
-    }
+        if(!r.ok)return null;
+        var d=await r.json();
+        if(!d.content)return null;
+        var decoded=decodeURIComponent(escape(atob(d.content)));
+        var obj=JSON.parse(decoded);
+        return {sha:d.sha, comments:obj.comments||[], assignments:obj.assignments||{}};
+    }catch(e){return null;}
 }
 
-// 读取 sha
-function getSha(){
-    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-        headers:{'Authorization':'token '+TOKEN}
-    })
-    .then(function(r){return r.json()})
-    .then(function(d){return d.sha||''})
-    .catch(function(){return''});
-}
-
-// 写入
-function save(arr){
-    return getSha().then(function(sha){
-        var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr}))));
-        return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+// 保存完整数据
+async function saveAll(comments, assignments){
+    try{
+        var shaResp=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+            headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
+        });
+        var shaData=await shaResp.json();
+        var sha=shaData.sha||'';
+        var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:comments,assignments:assignments}))));
+        var r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             method:'PUT',
             headers:{
                 'Authorization':'token '+TOKEN,
                 'Content-Type':'text/plain;charset=UTF-8'
             },
             body:JSON.stringify({message:'update',content:content,sha:sha})
-        }).then(function(r){return r.ok}).catch(function(){return false});
-    });
+        });
+        return r.ok;
+    }catch(e){return false;}
 }
 
-var CUR=null,BUSY=false,IDX=-1;
+var CUR=null,BUSY=false;
 
-function render(r){
-    document.getElementById('cnt').textContent=r||0;
+function render(remaining){
+    document.getElementById('cnt').textContent=remaining||0;
     var b=document.getElementById('area');
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
@@ -97,50 +99,119 @@ function render(r){
     }
 }
 
+// 分配评论：每个设备唯一分配，用 SHA 锁防冲突
 async function pick(){
     for(var i=0;i<20;i++){
-        var arr=await load();
-        if(arr===null){await new Promise(function(r){setTimeout(r,200)});continue}
-        if(arr.length===0){CUR=null;IDX=-1;render(0);return}
-        var idx=Math.floor(Math.random()*arr.length);
-        CUR=arr[idx];
-        arr.splice(idx,1);
-        if(await save(arr)){
-            render(arr.length);
+        var d=await loadAll();
+        if(!d){await sleep(200);continue}
+
+        var comments=d.comments;
+        var assignments=d.assignments||{};
+
+        // 1. 检查是否已分配给我
+        var mine=assignments[DEVID];
+        if(mine&&comments.indexOf(mine)>=0){
+            CUR=mine;
+            render(comments.length-Object.keys(assignments).length);
             return;
         }
-        await new Promise(function(r){setTimeout(r,50)});
+
+        // 2. 找未分配的评论
+        var assigned=Object.values(assignments);
+        var unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
+
+        if(unassigned.length===0){
+            CUR=null;render(0);return;
+        }
+
+        // 3. 随机选一条分配给我
+        var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
+        assignments[DEVID]=pick;
+
+        if(await saveAll(comments,assignments)){
+            CUR=pick;
+            render(comments.length-Object.keys(assignments).length);
+            return;
+        }
+        await sleep(50);
     }
-    CUR=null;IDX=-1;render(0);
+    CUR=null;render(0);
 }
 
+// 复制
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
     var btn=document.getElementById('copyBtn');
     if(btn)btn.disabled=true;
+
     try{
         if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR)}
         else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
+
+    for(var i=0;i<20;i++){
+        var d=await loadAll();
+        if(!d){await sleep(200);continue}
+
+        // 从评论列表删除当前评论
+        var idx=d.comments.indexOf(CUR);
+        if(idx>=0)d.comments.splice(idx,1);
+
+        // 删除我的分配
+        delete d.assignments[DEVID];
+
+        // 立即分配下一条
+        var assigned=Object.values(d.assignments);
+        var unassigned=d.comments.filter(function(x){return assigned.indexOf(x)<0});
+        if(unassigned.length>0){
+            var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
+            d.assignments[DEVID]=pick;
+            CUR=pick;
+        }else{
+            CUR=null;
+        }
+
+        if(await saveAll(d.comments,d.assignments)){
+            render(d.comments.length-Object.keys(d.assignments).length);
+            break;
+        }
+        await sleep(50);
+    }
     BUSY=false;
-    CUR=null;IDX=-1;
-    setTimeout(function(){pick()},300);
 }
 
+// 跳过
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-    // 把跳过的评论放回去
-    var arr=await load();
-    if(arr!==null){
-        arr.push(CUR);
-        await save(arr);
+
+    for(var i=0;i<20;i++){
+        var d=await loadAll();
+        if(!d){await sleep(200);continue}
+
+        // 删除我的分配（评论保留给其他人）
+        delete d.assignments[DEVID];
+
+        // 重新分配
+        var assigned=Object.values(d.assignments);
+        var unassigned=d.comments.filter(function(x){return assigned.indexOf(x)<0});
+        if(unassigned.length>0){
+            var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
+            d.assignments[DEVID]=pick;
+            CUR=pick;
+        }else{
+            CUR=null;
+        }
+
+        if(await saveAll(d.comments,d.assignments)){
+            render(d.comments.length-Object.keys(d.assignments).length);
+            break;
+        }
+        await sleep(50);
     }
-    CUR=null;IDX=-1;
     toast('⏭ 已跳过');
-    await pick();
     BUSY=false;
 }
 
