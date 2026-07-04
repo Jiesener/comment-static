@@ -40,23 +40,27 @@ var FILE='data.json';
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 
-// 读取（raw 允许 CORS，用 no-cache 避免 CDN 缓存）
+// 读取（直接用 GitHub API，不走 CDN，实时更新）
 function load(){
-    return fetch('https://raw.githubusercontent.com/'+REPO+'/main/'+FILE+'?t='+Date.now(),{
-        cache:'no-store',
-        headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN}
     })
-    .then(function(r){if(!r.ok)return[];return r.json()})
-    .then(function(d){return d.comments||[]})
+    .then(function(r){return r.json()})
+    .then(function(d){
+        if(!d.content)return[];
+        return JSON.parse(atob(d.content)).comments||[];
+    })
     .catch(function(){return null});
 }
 
 // 读取 sha
 function getSha(){
-    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{headers:{'Authorization':'token '+TOKEN}})
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN}
+    })
     .then(function(r){return r.json()})
     .then(function(d){return d.sha||''})
-    .catch(function(){return ''});
+    .catch(function(){return''});
 }
 
 // 写入
@@ -65,7 +69,10 @@ function save(arr){
         var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr}))));
         return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             method:'PUT',
-            headers:{'Authorization':'token '+TOKEN,'Content-Type':'application/json'},
+            headers:{
+                'Authorization':'token '+TOKEN,
+                'Content-Type':'text/plain;charset=UTF-8'
+            },
             body:JSON.stringify({message:'update',content:content,sha:sha})
         }).then(function(r){return r.ok}).catch(function(){return false});
     });
@@ -105,7 +112,7 @@ async function doCopy(){
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
-    // 复制后删除
+    // 复制后删除（用最新数据）
     var arr=await load();
     if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
         arr.splice(IDX,1);
