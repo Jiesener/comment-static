@@ -40,9 +40,12 @@ var FILE='data.json';
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 
-// 读取（raw 不需要 token）
+// 读取（raw 允许 CORS，用 no-cache 避免 CDN 缓存）
 function load(){
-    return fetch('https://raw.githubusercontent.com/'+REPO+'/main/'+FILE+'?t='+Date.now(),{cache:'no-store'})
+    return fetch('https://raw.githubusercontent.com/'+REPO+'/main/'+FILE+'?t='+Date.now(),{
+        cache:'no-store',
+        headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}
+    })
     .then(function(r){if(!r.ok)return[];return r.json()})
     .then(function(d){return d.comments||[]})
     .catch(function(){return null});
