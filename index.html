@@ -39,7 +39,7 @@ var TOKEN=['github_pat_11ARP77YI0','k8RWakgd5Mtt_nK97kftwfqKEMd0XnGm93GLZiKllBk4
 var REPO='Jiesener/comment-static';
 var FILE='data.json';
 
-// 生成设备唯一 ID
+// 设备 ID
 var DK='plzs_device_id';
 var DEVID=localStorage.getItem(DK);
 if(!DEVID){DEVID='d'+Math.random().toString(36).slice(2,8);localStorage.setItem(DK,DEVID)}
@@ -47,45 +47,43 @@ document.getElementById('info').textContent='📱 '+DEVID;
 
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-// 加载完整数据（comments + assignments）
-async function loadAll(){
-    try{
-        var r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-            headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
-        });
+// 简单正整数哈希
+function hash(s){var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return Math.abs(h)}
+
+// 加载数据
+function loadAll(){
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
+    })
+    .then(function(r){
         if(!r.ok)return null;
-        var d=await r.json();
-        if(!d.content)return null;
-        var decoded=decodeURIComponent(escape(atob(d.content)));
-        var obj=JSON.parse(decoded);
-        return {sha:d.sha, comments:obj.comments||[], assignments:obj.assignments||{}};
-    }catch(e){return null;}
+        return r.json().then(function(d){
+            if(!d.content)return null;
+            var obj=JSON.parse(decodeURIComponent(escape(atob(d.content))));
+            return {sha:d.sha,comments:obj.comments||[],assignments:obj.assignments||{}};
+        });
+    })
+    .catch(function(){return null});
 }
 
-// 保存完整数据（传入上次读取的 sha）
-async function saveAll(comments, assignments, existingSha){
-    try{
-        var sha=existingSha||'';
-        if(!sha){
-            var shaResp=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-                headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
-            });
-            var shaData=await shaResp.json();
-            sha=shaData.sha||'';
-        }
+// 保存（异步，不阻塞）
+function saveAsync(comments, assignments){
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
+    })
+    .then(function(r){return r.json()})
+    .then(function(d){
+        var sha=d.sha||'';
         var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:comments,assignments:assignments}))));
-        var r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             method:'PUT',
-            headers:{
-                'Authorization':'token '+TOKEN,
-                'Content-Type':'text/plain;charset=UTF-8'
-            },
+            headers:{'Authorization':'token '+TOKEN,'Content-Type':'text/plain;charset=UTF-8'},
             body:JSON.stringify({message:'update',content:content,sha:sha})
         });
-        return {ok:r.ok,sha:r.ok?null:sha};
-    }catch(e){return {ok:false};}
+    })
+    .then(function(r){return r.ok})
+    .catch(function(){return false});
 }
 
 var CUR=null,BUSY=false;
@@ -102,16 +100,15 @@ function render(remaining){
     }
 }
 
-// 分配评论：每个设备唯一分配，用 SHA 锁防冲突
+// ★ 核心：读数据 → 哈希选一条 → 立即显示 → 后台去锁定
 async function pick(){
-    // 先快速加载显示（减少等待）
     var d=await loadAll();
-    if(!d){setTimeout(function(){pick()},1000);return}
-    
+    if(!d||!d.comments.length){CUR=null;render(0);return}
+
     var comments=d.comments;
     var assignments=d.assignments||{};
 
-    // 检查是否已分配
+    // 1. 如果已分配给我，直接显示
     var mine=assignments[DEVID];
     if(mine&&comments.indexOf(mine)>=0){
         CUR=mine;
@@ -119,31 +116,52 @@ async function pick(){
         return;
     }
 
-    // 找未分配
+    // 2. 找未分配的
     var assigned=Object.values(assignments);
     var unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
-    if(unassigned.length===0){CUR=null;render(0);return}
 
-    // 只重试5次（减少延迟）
+    // 3. 哈希选一条（未分配的优先，公平分布）
+    var pool=unassigned.length?unassigned:comments;
+    var idx=hash(DEVID)%pool.length;
+    CUR=pool[idx];
+
+    // 4. 立即显示！
+    var remaining=unassigned.length?unassigned.length:0;
+    if(!unassigned.length)remaining=comments.length-Object.keys(assignments).length;
+    render(remaining);
+
+    // 5. 后台去锁定（不阻塞页面）
+    setTimeout(function(){claim(CUR)},100);
+}
+
+// 后台锁定：尝试把我的分配写入数据库
+async function claim(comment){
     for(var i=0;i<5;i++){
-        var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
-        assignments[DEVID]=pick;
-        var result=await saveAll(comments,assignments,d.sha);
-        if(result.ok==true){
-            CUR=pick;
-            render(comments.length-Object.keys(assignments).length);
+        var d=await loadAll();
+        if(!d)return;
+        // 如果已经被别人锁定，并且我已经显示了不同的，就保持当前显示
+        // 如果未被锁定，或者我显示的还没人占，就占住它
+        var a=d.assignments||{};
+        var myKey=Object.keys(a).find(function(k){return a[k]===comment});
+        if(myKey&&myKey!==DEVID){
+            // 这条被别人占了，如果当前显示的还是这条，换一条
+            if(CUR===comment){
+                // 找一条没被占的
+                var as=Object.values(a);
+                var uu=d.comments.filter(function(x){return as.indexOf(x)<0});
+                if(uu.length){
+                    CUR=uu[hash(DEVID+Date.now())%uu.length];
+                    render(uu.length);
+                }
+            }
             return;
         }
-        // SHA冲突，重新加载再试
-        await sleep(150);
-        d=await loadAll();
-        if(!d){continue}
-        comments=d.comments;assignments=d.assignments||{};
-        assigned=Object.values(assignments);
-        unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
-        if(unassigned.length===0){CUR=null;render(0);return}
+        // 占住它
+        a[DEVID]=comment;
+        var ok=await saveAsync(d.comments,a);
+        if(ok)return;
+        await new Promise(function(r){setTimeout(r,200)});
     }
-    CUR=null;render(0);
 }
 
 async function doCopy(){
@@ -157,39 +175,54 @@ async function doCopy(){
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
+    // 后台删除并分配下一条
+    var oldCUR=CUR;
+    CUR=null;
+    BUSY=false;
+
     for(var i=0;i<5;i++){
         var d=await loadAll();
-        if(!d){await sleep(200);continue}
-        var idx=d.comments.indexOf(CUR);
+        if(!d){continue}
+        var idx=d.comments.indexOf(oldCUR);
         if(idx>=0)d.comments.splice(idx,1);
         delete d.assignments[DEVID];
         var a=Object.values(d.assignments);
         var u=d.comments.filter(function(x){return a.indexOf(x)<0});
-        if(u.length>0){var p=u[Math.floor(Math.random()*u.length)];d.assignments[DEVID]=p;CUR=p}
-        else{CUR=null}
-        var okResult=await saveAll(d.comments,d.assignments,d.sha);
-        if(okResult.ok==true){render(d.comments.length-Object.keys(d.assignments).length);break}
-        await sleep(150);
+        if(u.length){
+            var p=u[hash(DEVID+Date.now())%u.length];
+            d.assignments[DEVID]=p;
+            CUR=p;
+        }else{CUR=null}
+        var ok=await saveAsync(d.comments,d.assignments);
+        if(ok){render(d.comments.length-Object.keys(d.assignments).length);break;}
     }
-    BUSY=false;
+    if(!CUR)render(0);
 }
 
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
+
+    var oldCUR=CUR;
+    CUR=null;
+
     for(var i=0;i<5;i++){
         var d=await loadAll();
-        if(!d){await sleep(200);continue}
+        if(!d){continue}
         delete d.assignments[DEVID];
         var a=Object.values(d.assignments);
         var u=d.comments.filter(function(x){return a.indexOf(x)<0});
-        if(u.length>0){var p=u[Math.floor(Math.random()*u.length)];d.assignments[DEVID]=p;CUR=p}
-        else{CUR=null}
-        var okResult=await saveAll(d.comments,d.assignments,d.sha);
-        if(okResult.ok==true){render(d.comments.length-Object.keys(d.assignments).length);break}
-        await sleep(150);
+        if(u.length){
+            var p=u[hash(DEVID+Date.now())%u.length];
+            d.assignments[DEVID]=p;
+            CUR=p;
+        }else{CUR=null}
+        var ok=await saveAsync(d.comments,d.assignments);
+        if(ok){render(d.comments.length-Object.keys(d.assignments).length);break;}
     }
-    toast('⏭ 已跳过');BUSY=false;
+    if(!CUR)render(0);
+    toast('⏭ 已跳过');
+    BUSY=false;
 }
 
 pick();
