@@ -44,8 +44,8 @@ var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im
 var H={apikey:KEY,Authorization:'Bearer '+KEY};
 
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
-function getCount(){return fetch(URL+'/rest/v1/comments?select=id',{headers:H,method:'HEAD'}).then(function(r){return parseInt(r.headers.get('content-range').split('/')[1]||'0')}).catch(function(){return 0})}
-function delAll(){return fetch(URL+'/rest/v1/comments?id=gt.0',{method:'DELETE',headers:H}).then(function(){return true}).catch(function(){return false})}
+function getCount(){return fetch(URL+'/rest/v1/comments?select=id',{headers:H}).then(function(r){return r.json()}).then(function(arr){return arr.length}).catch(function(){return 0})}
+function delAll(){return fetch(URL+'/rest/v1/comments?delete=eq.*',{method:'DELETE',headers:H}).then(function(){return true}).catch(function(){return false})}
 function addBatch(arr){var rows=arr.map(function(t){return{text:t}});return fetch(URL+'/rest/v1/comments',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify(rows)}).then(function(){return true}).catch(function(){return false})}
 
 getCount().then(function(n){document.getElementById('count').textContent=n});
