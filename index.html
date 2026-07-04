@@ -98,12 +98,20 @@ function render(r){
 }
 
 async function pick(){
-    var arr=await load();
-    if(arr===null||arr.length===0){CUR=null;IDX=-1;render(0);return}
-    var idx=Math.floor(Math.random()*arr.length);
-    CUR=arr[idx];
-    IDX=idx;
-    render(arr.length);
+    for(var i=0;i<20;i++){
+        var arr=await load();
+        if(arr===null){await new Promise(function(r){setTimeout(r,200)});continue}
+        if(arr.length===0){CUR=null;IDX=-1;render(0);return}
+        var idx=Math.floor(Math.random()*arr.length);
+        CUR=arr[idx];
+        arr.splice(idx,1);
+        if(await save(arr)){
+            render(arr.length);
+            return;
+        }
+        await new Promise(function(r){setTimeout(r,50)});
+    }
+    CUR=null;IDX=-1;render(0);
 }
 
 async function doCopy(){
@@ -116,13 +124,6 @@ async function doCopy(){
         else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
-
-    // 复制后删除（用最新数据）
-    var arr=await load();
-    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
-        arr.splice(IDX,1);
-        await save(arr);
-    }
     BUSY=false;
     CUR=null;IDX=-1;
     setTimeout(function(){pick()},300);
@@ -131,9 +132,10 @@ async function doCopy(){
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
+    // 把跳过的评论放回去
     var arr=await load();
-    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
-        arr.splice(IDX,1);
+    if(arr!==null){
+        arr.push(CUR);
         await save(arr);
     }
     CUR=null;IDX=-1;
