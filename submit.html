@@ -68,10 +68,10 @@ function getSha(){
     .catch(function(){return''});
 }
 
-// 写入（关键：用 text/plain 避免 CORS 预检）
+// 写入（保存评论并清空所有分配）
 function save(arr){
     return getSha().then(function(sha){
-        var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr}))));
+        var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr,assignments:{}}))));
         var body=JSON.stringify({message:'update',content:content,sha:sha});
         return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             method:'PUT',
