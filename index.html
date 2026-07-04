@@ -64,14 +64,17 @@ async function loadAll(){
     }catch(e){return null;}
 }
 
-// 保存完整数据
-async function saveAll(comments, assignments){
+// 保存完整数据（传入上次读取的 sha）
+async function saveAll(comments, assignments, existingSha){
     try{
-        var shaResp=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-            headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
-        });
-        var shaData=await shaResp.json();
-        var sha=shaData.sha||'';
+        var sha=existingSha||'';
+        if(!sha){
+            var shaResp=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+                headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
+            });
+            var shaData=await shaResp.json();
+            sha=shaData.sha||'';
+        }
         var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:comments,assignments:assignments}))));
         var r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             method:'PUT',
@@ -81,8 +84,8 @@ async function saveAll(comments, assignments){
             },
             body:JSON.stringify({message:'update',content:content,sha:sha})
         });
-        return r.ok;
-    }catch(e){return false;}
+        return {ok:r.ok,sha:r.ok?null:sha};
+    }catch(e){return {ok:false};}
 }
 
 var CUR=null,BUSY=false;
@@ -101,49 +104,52 @@ function render(remaining){
 
 // 分配评论：每个设备唯一分配，用 SHA 锁防冲突
 async function pick(){
-    for(var i=0;i<20;i++){
-        var d=await loadAll();
-        if(!d){await sleep(200);continue}
+    // 先快速加载显示（减少等待）
+    var d=await loadAll();
+    if(!d){setTimeout(function(){pick()},1000);return}
+    
+    var comments=d.comments;
+    var assignments=d.assignments||{};
 
-        var comments=d.comments;
-        var assignments=d.assignments||{};
+    // 检查是否已分配
+    var mine=assignments[DEVID];
+    if(mine&&comments.indexOf(mine)>=0){
+        CUR=mine;
+        render(comments.length-Object.keys(assignments).length);
+        return;
+    }
 
-        // 1. 检查是否已分配给我
-        var mine=assignments[DEVID];
-        if(mine&&comments.indexOf(mine)>=0){
-            CUR=mine;
-            render(comments.length-Object.keys(assignments).length);
-            return;
-        }
+    // 找未分配
+    var assigned=Object.values(assignments);
+    var unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
+    if(unassigned.length===0){CUR=null;render(0);return}
 
-        // 2. 找未分配的评论
-        var assigned=Object.values(assignments);
-        var unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
-
-        if(unassigned.length===0){
-            CUR=null;render(0);return;
-        }
-
-        // 3. 随机选一条分配给我
+    // 只重试5次（减少延迟）
+    for(var i=0;i<5;i++){
         var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
         assignments[DEVID]=pick;
-
-        if(await saveAll(comments,assignments)){
+        var result=await saveAll(comments,assignments,d.sha);
+        if(result.ok==true){
             CUR=pick;
             render(comments.length-Object.keys(assignments).length);
             return;
         }
-        await sleep(50);
+        // SHA冲突，重新加载再试
+        await sleep(150);
+        d=await loadAll();
+        if(!d){continue}
+        comments=d.comments;assignments=d.assignments||{};
+        assigned=Object.values(assignments);
+        unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
+        if(unassigned.length===0){CUR=null;render(0);return}
     }
     CUR=null;render(0);
 }
 
-// 复制
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
-    var btn=document.getElementById('copyBtn');
-    if(btn)btn.disabled=true;
+    var btn=document.getElementById('copyBtn');if(btn)btn.disabled=true;
 
     try{
         if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR)}
@@ -151,68 +157,39 @@ async function doCopy(){
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
-    for(var i=0;i<20;i++){
+    for(var i=0;i<5;i++){
         var d=await loadAll();
         if(!d){await sleep(200);continue}
-
-        // 从评论列表删除当前评论
         var idx=d.comments.indexOf(CUR);
         if(idx>=0)d.comments.splice(idx,1);
-
-        // 删除我的分配
         delete d.assignments[DEVID];
-
-        // 立即分配下一条
-        var assigned=Object.values(d.assignments);
-        var unassigned=d.comments.filter(function(x){return assigned.indexOf(x)<0});
-        if(unassigned.length>0){
-            var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
-            d.assignments[DEVID]=pick;
-            CUR=pick;
-        }else{
-            CUR=null;
-        }
-
-        if(await saveAll(d.comments,d.assignments)){
-            render(d.comments.length-Object.keys(d.assignments).length);
-            break;
-        }
-        await sleep(50);
+        var a=Object.values(d.assignments);
+        var u=d.comments.filter(function(x){return a.indexOf(x)<0});
+        if(u.length>0){var p=u[Math.floor(Math.random()*u.length)];d.assignments[DEVID]=p;CUR=p}
+        else{CUR=null}
+        var okResult=await saveAll(d.comments,d.assignments,d.sha);
+        if(okResult.ok==true){render(d.comments.length-Object.keys(d.assignments).length);break}
+        await sleep(150);
     }
     BUSY=false;
 }
 
-// 跳过
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-
-    for(var i=0;i<20;i++){
+    for(var i=0;i<5;i++){
         var d=await loadAll();
         if(!d){await sleep(200);continue}
-
-        // 删除我的分配（评论保留给其他人）
         delete d.assignments[DEVID];
-
-        // 重新分配
-        var assigned=Object.values(d.assignments);
-        var unassigned=d.comments.filter(function(x){return assigned.indexOf(x)<0});
-        if(unassigned.length>0){
-            var pick=unassigned[Math.floor(Math.random()*unassigned.length)];
-            d.assignments[DEVID]=pick;
-            CUR=pick;
-        }else{
-            CUR=null;
-        }
-
-        if(await saveAll(d.comments,d.assignments)){
-            render(d.comments.length-Object.keys(d.assignments).length);
-            break;
-        }
-        await sleep(50);
+        var a=Object.values(d.assignments);
+        var u=d.comments.filter(function(x){return a.indexOf(x)<0});
+        if(u.length>0){var p=u[Math.floor(Math.random()*u.length)];d.assignments[DEVID]=p;CUR=p}
+        else{CUR=null}
+        var okResult=await saveAll(d.comments,d.assignments,d.sha);
+        if(okResult.ok==true){render(d.comments.length-Object.keys(d.assignments).length);break}
+        await sleep(150);
     }
-    toast('⏭ 已跳过');
-    BUSY=false;
+    toast('⏭ 已跳过');BUSY=false;
 }
 
 pick();
