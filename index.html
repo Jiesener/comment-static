@@ -33,16 +33,50 @@ button:disabled{opacity:.4;cursor:not-allowed}
 </div>
 
 <script>
-var URL='https://dkyqhqiggavtsxjaxl.supabase.co';
-var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRreXFoaWdndGF2dHN4amFseG9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MTc0OTgsImV4cCI6MjA5ODQ5MzQ5OH0.ohg1tOTlAMSxcOYUQAiNHE-wA8YQzrDTdkCFTDVFOXo';
-var H={apikey:KEY,Authorization:'Bearer '+KEY};
+var TOKEN=['github_pat_11ARP77YI0','k8RWakgd5Mtt_nK97kftwfqKEMd0XnGm93GLZiKllBk4uFkPmzS5TJ3wGP7PLXJ78xwAbBXm'].join('');
+var REPO='Jiesener/comment-static';
+var FILE='data.json';
 
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 
-function load(){return fetch(URL+'/rest/v1/comments?select=id,text&order=id',{headers:H}).then(function(r){return r.json()}).then(function(arr){return arr.map(function(x){return{x:id:x.id,text:x.text}})}).catch(function(){return null})}
-function delById(id){return fetch(URL+'/rest/v1/comments?id=eq.'+id,{method:'DELETE',headers:H}).then(function(){return true}).catch(function(){return false})}
+// 读取（GitHub API，实时更新）
+function load(){
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE+'?t='+Date.now(),{
+        headers:{'Authorization':'token '+TOKEN,'Cache-Control':'no-cache','Pragma':'no-cache'}
+    })
+    .then(function(r){return r.json()})
+    .then(function(d){
+        if(!d.content)return[];
+        return JSON.parse(atob(d.content)).comments||[];
+    })
+    .catch(function(){return null});
+}
+
+// 读取 sha
+function getSha(){
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN}
+    })
+    .then(function(r){return r.json()})
+    .then(function(d){return d.sha||''})
+    .catch(function(){return''});
+}
+
+// 写入
+function save(arr){
+    return getSha().then(function(sha){
+        var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr}))));
+        return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+            method:'PUT',
+            headers:{
+                'Authorization':'token '+TOKEN,
+                'Content-Type':'text/plain;charset=UTF-8'
+            },
+            body:JSON.stringify({message:'update',content:content,sha:sha})
+        }).then(function(r){return r.ok}).catch(function(){return false});
+    });
+}
 
 var CUR=null,BUSY=false,IDX=-1;
 
@@ -52,24 +86,19 @@ function render(r){
     if(!CUR){
         b.innerHTML='<div class="empty"><div style="font-size:48px;margin-bottom:10px">📭</div><p>没有更多评论了</p></div>';
     }else{
-        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR.text)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
+        b.innerHTML='<textarea id="ta" readonly>'+esc(CUR)+'</textarea><div class="btns"><button id="copyBtn">📋 复制</button><button class="sec" id="skipBtn">⏭ 跳过</button></div>';
         document.getElementById('copyBtn').onclick=doCopy;
         document.getElementById('skipBtn').onclick=doSkip;
     }
 }
 
 async function pick(){
-    for(var i=0;i<20;i++){
-        var arr=await load();
-        if(arr===null){await sleep(200);continue}
-        if(arr.length===0){CUR=null;IDX=-1;render(0);return}
-        var idx=Math.floor(Math.random()*arr.length);
-        CUR=arr[idx];
-        IDX=idx;
-        render(arr.length);
-        return;
-    }
-    CUR=null;IDX=-1;render(0);
+    var arr=await load();
+    if(arr===null||arr.length===0){CUR=null;IDX=-1;render(0);return}
+    var idx=Math.floor(Math.random()*arr.length);
+    CUR=arr[idx];
+    IDX=idx;
+    render(arr.length);
 }
 
 async function doCopy(){
@@ -78,11 +107,17 @@ async function doCopy(){
     var btn=document.getElementById('copyBtn');
     if(btn)btn.disabled=true;
     try{
-        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR.text)}
+        if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(CUR)}
         else{var ta=document.getElementById('ta');if(ta){ta.select();document.execCommand('copy')}}
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
-    await delById(CUR.id);
+
+    // 复制后删除（用最新数据）
+    var arr=await load();
+    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
+        arr.splice(IDX,1);
+        await save(arr);
+    }
     BUSY=false;
     CUR=null;IDX=-1;
     setTimeout(function(){pick()},300);
@@ -91,7 +126,11 @@ async function doCopy(){
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-    await delById(CUR.id);
+    var arr=await load();
+    if(arr&&IDX>=0&&IDX<arr.length&&arr[IDX]===CUR){
+        arr.splice(IDX,1);
+        await save(arr);
+    }
     CUR=null;IDX=-1;
     toast('⏭ 已跳过');
     await pick();
