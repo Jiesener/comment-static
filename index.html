@@ -40,22 +40,17 @@ var FILE='data.json';
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 
-// 读取（GitHub API，实时更新）
+// 读取（GitHub API）
 async function load(){
     try{
-        const r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE+'?t='+Date.now(),{
-            headers:{'Authorization':'token '+TOKEN,'Cache-Control':'no-cache','Pragma':'no-cache','Accept':'application/vnd.github+json'}
+        const r=await fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+            headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
         });
-        console.log('API status:',r.status);
         if(!r.ok)return[];
         const d=await r.json();
-        console.log('API response keys:',Object.keys(d).join(','));
-        console.log('content length:',(d.content||'').length);
         if(!d.content)return[];
         const decoded=decodeURIComponent(escape(atob(d.content)));
-        console.log('decoded:',decoded.substring(0,100));
         const obj=JSON.parse(decoded);
-        console.log('parsed comments count:',(obj.comments||[]).length);
         return obj.comments||[];
     }catch(e){
         console.error('load error:',e);
