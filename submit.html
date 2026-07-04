@@ -39,47 +39,49 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <script>
-// 用 GitHub API 存储数据，不需要任何外部服务
 var TOKEN=['github_pat_11ARP77YI0','k8RWakgd5Mtt_nK97kftwfqKEMd0XnGm93GLZiKllBk4uFkPmzS5TJ3wGP7PLXJ78xwAbBXm'].join('');
 var REPO='Jiesener/comment-static';
 var FILE='data.json';
 
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
 
-// 读取数据（raw 不需要 token，无限速）
+// 读取（raw 允许 CORS）
 function load(){
     return fetch('https://raw.githubusercontent.com/'+REPO+'/main/'+FILE+'?t='+Date.now(),{cache:'no-store'})
-    .then(function(r){
-        if(!r.ok) return [];
-        return r.json();
-    })
+    .then(function(r){if(!r.ok)return[];return r.json()})
     .then(function(d){return d.comments||[]})
-    .catch(function(){return []});
+    .catch(function(){return[]});
 }
 
-// 读取文件的 sha（写入需要）
+// 读取 sha（用 text/plain 避免 CORS 预检）
 function getSha(){
-    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{headers:{'Authorization':'token '+TOKEN}})
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN}
+    })
     .then(function(r){return r.json()})
     .then(function(d){return d.sha||''})
-    .catch(function(){return ''});
+    .catch(function(){return''});
 }
 
-// 写入数据
+// 写入（关键：用 text/plain 避免 CORS 预检）
 function save(arr){
     return getSha().then(function(sha){
         var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr}))));
+        var body=JSON.stringify({message:'update',content:content,sha:sha});
         return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
             method:'PUT',
-            headers:{'Authorization':'token '+TOKEN,'Content-Type':'application/json'},
-            body:JSON.stringify({message:'update comments',content:content,sha:sha})
+            headers:{
+                'Authorization':'token '+TOKEN,
+                'Content-Type':'text/plain;charset=UTF-8',
+                'Accept':'application/json'
+            },
+            body:body
         })
         .then(function(r){return r.ok})
-        .catch(function(){return false});
+        .catch(function(e){console.error('save error:',e);return false});
     });
 }
 
-// 初始化计数
 load().then(function(arr){document.getElementById('count').textContent=arr.length});
 
 async function doSubmit(){
@@ -98,7 +100,7 @@ async function doSubmit(){
         document.getElementById('inp').value='';
         document.getElementById('lc').textContent='0 行';
     }else{
-        showMsg('❌ 提交失败','error');
+        showMsg('❌ 提交失败，请检查网络','error');
     }
     btn.disabled=false;btn.textContent='📤 提交内容';
 }
