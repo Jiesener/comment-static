@@ -100,7 +100,7 @@ function render(remaining){
     }
 }
 
-// ★ 核心：读数据 → 哈希选一条 → 立即显示 → 后台去锁定
+// ★ 核心：读数据 → 释放旧分配 → 哈希选新 → 立即显示 → 后台锁定
 async function pick(){
     var d=await loadAll();
     if(!d||!d.comments.length){CUR=null;render(0);return}
@@ -108,29 +108,22 @@ async function pick(){
     var comments=d.comments;
     var assignments=d.assignments||{};
 
-    // 1. 如果已分配给我，直接显示
-    var mine=assignments[DEVID];
-    if(mine&&comments.indexOf(mine)>=0){
-        CUR=mine;
-        render(comments.length-Object.keys(assignments).length);
-        return;
-    }
+    // 1. 释放我的旧分配（如果之前打开过）
+    delete assignments[DEVID];
 
     // 2. 找未分配的
     var assigned=Object.values(assignments);
     var unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
 
-    // 3. 哈希选一条（未分配的优先，公平分布）
+    // 3. 哈希选一条（设备号+时间戳，每次打开都不同）
     var pool=unassigned.length?unassigned:comments;
-    var idx=hash(DEVID)%pool.length;
+    var idx=hash(DEVID+Date.now())%pool.length;
     CUR=pool[idx];
 
     // 4. 立即显示！
-    var remaining=unassigned.length?unassigned.length:0;
-    if(!unassigned.length)remaining=comments.length-Object.keys(assignments).length;
-    render(remaining);
+    render(unassigned.length||comments.length-Object.keys(assignments).length);
 
-    // 5. 后台去锁定（不阻塞页面）
+    // 5. 后台锁定
     setTimeout(function(){claim(CUR)},100);
 }
 
