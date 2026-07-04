@@ -45,10 +45,10 @@ var FILE='data.json';
 
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
 
-// 读取（GitHub API，无 CDN 缓存）
+// 读取（GitHub API）
 function load(){
     return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-        headers:{'Authorization':'token '+TOKEN}
+        headers:{'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'}
     })
     .then(function(r){return r.json()})
     .then(function(d){
