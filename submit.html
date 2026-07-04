@@ -45,11 +45,16 @@ var FILE='data.json';
 
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
 
-// 读取（raw 允许 CORS）
+// 读取（GitHub API，无 CDN 缓存）
 function load(){
-    return fetch('https://raw.githubusercontent.com/'+REPO+'/main/'+FILE+'?t='+Date.now(),{cache:'no-store'})
-    .then(function(r){if(!r.ok)return[];return r.json()})
-    .then(function(d){return d.comments||[]})
+    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
+        headers:{'Authorization':'token '+TOKEN}
+    })
+    .then(function(r){return r.json()})
+    .then(function(d){
+        if(!d.content)return[];
+        return JSON.parse(atob(d.content)).comments||[];
+    })
     .catch(function(){return[]});
 }
 
