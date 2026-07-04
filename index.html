@@ -100,7 +100,7 @@ function render(remaining){
     }
 }
 
-// ★ 核心：读数据 → 释放旧分配 → 哈希选新 → 立即显示 → 后台锁定
+// ★ 核心：读数据 → 释放旧分配 → 哈希选新 → 立即显示（不存）
 async function pick(){
     var d=await loadAll();
     if(!d||!d.comments.length){CUR=null;render(0);return}
@@ -108,55 +108,23 @@ async function pick(){
     var comments=d.comments;
     var assignments=d.assignments||{};
 
-    // 1. 释放我的旧分配（如果之前打开过）
+    // 释放我的旧分配
     delete assignments[DEVID];
 
-    // 2. 找未分配的
+    // 找未分配的
     var assigned=Object.values(assignments);
     var unassigned=comments.filter(function(x){return assigned.indexOf(x)<0});
 
-    // 3. 哈希选一条（设备号+时间戳，每次打开都不同）
+    // 哈希选一条
     var pool=unassigned.length?unassigned:comments;
     var idx=hash(DEVID+Date.now())%pool.length;
     CUR=pool[idx];
 
-    // 4. 立即显示！
+    // 立即显示
     render(unassigned.length||comments.length-Object.keys(assignments).length);
-
-    // 5. 后台锁定
-    setTimeout(function(){claim(CUR)},100);
 }
 
-// 后台锁定：尝试把我的分配写入数据库
-async function claim(comment){
-    for(var i=0;i<5;i++){
-        var d=await loadAll();
-        if(!d)return;
-        // 如果已经被别人锁定，并且我已经显示了不同的，就保持当前显示
-        // 如果未被锁定，或者我显示的还没人占，就占住它
-        var a=d.assignments||{};
-        var myKey=Object.keys(a).find(function(k){return a[k]===comment});
-        if(myKey&&myKey!==DEVID){
-            // 这条被别人占了，如果当前显示的还是这条，换一条
-            if(CUR===comment){
-                // 找一条没被占的
-                var as=Object.values(a);
-                var uu=d.comments.filter(function(x){return as.indexOf(x)<0});
-                if(uu.length){
-                    CUR=uu[hash(DEVID+Date.now())%uu.length];
-                    render(uu.length);
-                }
-            }
-            return;
-        }
-        // 占住它
-        a[DEVID]=comment;
-        var ok=await saveAsync(d.comments,a);
-        if(ok)return;
-        await new Promise(function(r){setTimeout(r,200)});
-    }
-}
-
+// 复制：删除评论 + 保存 + 分配下一条
 async function doCopy(){
     if(BUSY||!CUR)return;
     BUSY=true;
@@ -168,50 +136,39 @@ async function doCopy(){
         toast('✅ 已复制！');
     }catch(e){toast('⚠️ 复制失败');BUSY=false;if(btn)btn.disabled=false;return}
 
-    // 后台删除并分配下一条
-    var oldCUR=CUR;
+    var old=CUR;
     CUR=null;
-    BUSY=false;
 
     for(var i=0;i<5;i++){
         var d=await loadAll();
-        if(!d){continue}
-        var idx=d.comments.indexOf(oldCUR);
-        if(idx>=0)d.comments.splice(idx,1);
+        if(!d){await new Promise(function(r){setTimeout(r,200)});continue}
+        var idx=d.comments.indexOf(old);
+        if(idx>=0)d.comments.splice(idx,1);  // 永久删除
         delete d.assignments[DEVID];
         var a=Object.values(d.assignments);
         var u=d.comments.filter(function(x){return a.indexOf(x)<0});
-        if(u.length){
-            var p=u[hash(DEVID+Date.now())%u.length];
-            d.assignments[DEVID]=p;
-            CUR=p;
-        }else{CUR=null}
-        var ok=await saveAsync(d.comments,d.assignments);
-        if(ok){render(d.comments.length-Object.keys(d.assignments).length);break;}
+        if(u.length){var p=u[hash(DEVID+Date.now())%u.length];d.assignments[DEVID]=p;CUR=p}
+        else{CUR=null}
+        if(await saveAsync(d.comments,d.assignments)){render(d.comments.length-Object.keys(d.assignments).length);break}
     }
     if(!CUR)render(0);
+    BUSY=false;
 }
 
+// 跳过：释放当前 + 保存 + 分配下一条
 async function doSkip(){
     if(BUSY)return;
     BUSY=true;
-
-    var oldCUR=CUR;
     CUR=null;
-
     for(var i=0;i<5;i++){
         var d=await loadAll();
-        if(!d){continue}
+        if(!d){await new Promise(function(r){setTimeout(r,200)});continue}
         delete d.assignments[DEVID];
         var a=Object.values(d.assignments);
         var u=d.comments.filter(function(x){return a.indexOf(x)<0});
-        if(u.length){
-            var p=u[hash(DEVID+Date.now())%u.length];
-            d.assignments[DEVID]=p;
-            CUR=p;
-        }else{CUR=null}
-        var ok=await saveAsync(d.comments,d.assignments);
-        if(ok){render(d.comments.length-Object.keys(d.assignments).length);break;}
+        if(u.length){var p=u[hash(DEVID+Date.now())%u.length];d.assignments[DEVID]=p;CUR=p}
+        else{CUR=null}
+        if(await saveAsync(d.comments,d.assignments)){render(d.comments.length-Object.keys(d.assignments).length);break}
     }
     if(!CUR)render(0);
     toast('⏭ 已跳过');
