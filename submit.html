@@ -29,7 +29,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <body>
 <div class="box">
 <h1>📝 提交内容</h1>
-<div class="bar"><span>📌 云端 <strong id="count">-</strong> 条</span><span>⚠️ 提交将替换所有旧内容</span></div>
+<div class="bar"><span>📌 云端 <strong id="count">0</strong> 条</span><span>⚠️ 提交将替换所有旧内容</span></div>
 <div class="msg" id="msg" style="display:none"></div>
 <textarea id="inp" placeholder="输入多条内容，每行一条" required></textarea>
 <div class="lc" id="lc">0 行</div>
@@ -39,55 +39,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <script>
-var TOKEN=['github_pat_11ARP77YI0','k8RWakgd5Mtt_nK97kftwfqKEMd0XnGm93GLZiKllBk4uFkPmzS5TJ3wGP7PLXJ78xwAbBXm'].join('');
-var REPO='Jiesener/comment-static';
-var FILE='data.json';
+var URL='https://dkyqhqiggavtsxjaxl.supabase.co';
+var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRreXFoaWdndGF2dHN4amFseG9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MTc0OTgsImV4cCI6MjA5ODQ5MzQ5OH0.ohg1tOTlAMSxcOYUQAiNHE-wA8YQzrDTdkCFTDVFOXo';
+var H={apikey:KEY,Authorization:'Bearer '+KEY};
 
 function showMsg(t,c){var e=document.getElementById('msg');e.textContent=t;e.className='msg '+c;e.style.display='block';setTimeout(function(){e.style.display='none'},5000)}
 
-// 读取（GitHub API，无 CDN 缓存）
-function load(){
-    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-        headers:{'Authorization':'token '+TOKEN}
-    })
-    .then(function(r){return r.json()})
-    .then(function(d){
-        if(!d.content)return[];
-        return JSON.parse(atob(d.content)).comments||[];
-    })
-    .catch(function(){return[]});
+async function getCount(){
+    try{
+        var r=await fetch(URL+'/rest/v1/comments?select=id',{headers:H});
+        var arr=await r.json();
+        document.getElementById('count').textContent=arr.length;
+    }catch(e){document.getElementById('count').textContent='?'}
 }
-
-// 读取 sha（用 text/plain 避免 CORS 预检）
-function getSha(){
-    return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-        headers:{'Authorization':'token '+TOKEN}
-    })
-    .then(function(r){return r.json()})
-    .then(function(d){return d.sha||''})
-    .catch(function(){return''});
-}
-
-// 写入（关键：用 text/plain 避免 CORS 预检）
-function save(arr){
-    return getSha().then(function(sha){
-        var content=btoa(unescape(encodeURIComponent(JSON.stringify({comments:arr}))));
-        var body=JSON.stringify({message:'update',content:content,sha:sha});
-        return fetch('https://api.github.com/repos/'+REPO+'/contents/'+FILE,{
-            method:'PUT',
-            headers:{
-                'Authorization':'token '+TOKEN,
-                'Content-Type':'text/plain;charset=UTF-8',
-                'Accept':'application/json'
-            },
-            body:body
-        })
-        .then(function(r){return r.ok})
-        .catch(function(e){console.error('save error:',e);return false});
-    });
-}
-
-load().then(function(arr){document.getElementById('count').textContent=arr.length});
 
 async function doSubmit(){
     var lines=document.getElementById('inp').value.split('\n');
@@ -98,22 +62,39 @@ async function doSubmit(){
     var btn=document.getElementById('subBtn');
     btn.disabled=true;btn.textContent='⏳ 保存中...';
 
-    var ok=await save(arr);
-    if(ok){
-        document.getElementById('count').textContent=arr.length;
-        showMsg('✅ 成功提交 '+arr.length+' 条','success');
-        document.getElementById('inp').value='';
-        document.getElementById('lc').textContent='0 行';
-    }else{
-        showMsg('❌ 提交失败，请检查网络','error');
+    try{
+        // 1. 删除所有旧评论
+        var delR=await fetch(URL+'/rest/v1/comments?id=gte.1',{method:'DELETE',headers:H});
+        console.log('DELETE status:',delR.status);
+
+        // 2. 插入新评论
+        var rows=arr.map(function(t){return{text:t}});
+        var postR=await fetch(URL+'/rest/v1/comments',{
+            method:'POST',
+            headers:Object.assign({'Content-Type':'application/json'},H),
+            body:JSON.stringify(rows)
+        });
+        console.log('POST status:',postR.status);
+
+        if(postR.ok){
+            document.getElementById('count').textContent=arr.length;
+            showMsg('✅ 成功提交 '+arr.length+' 条','success');
+            document.getElementById('inp').value='';
+            document.getElementById('lc').textContent='0 行';
+        }else{
+            var err=await postR.text();
+            console.error('POST error:',err);
+            showMsg('❌ 提交失败: '+postR.status,'error');
+        }
+    }catch(e){
+        console.error('Error:',e);
+        showMsg('❌ 网络错误: '+e.message,'error');
     }
+
     btn.disabled=false;btn.textContent='📤 提交内容';
 }
 
-document.getElementById('inp').addEventListener('input',function(){
-    var n=this.value.split('\n').filter(function(l){return l.trim()}).length;
-    document.getElementById('lc').textContent=n+' 行';
-});
+document.getElementById('inp').addEventListener('input',function(){var n=this.value.split('\n').filter(function(l){return l.trim()}).length;document.getElementById('lc').textContent=n+' 行'});
 </script>
 </body>
 </html>
