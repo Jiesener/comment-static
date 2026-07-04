@@ -53,7 +53,7 @@ function load(){
     .then(function(r){return r.json()})
     .then(function(d){
         if(!d.content)return[];
-        return JSON.parse(atob(d.content)).comments||[];
+        return JSON.parse(decodeURIComponent(escape(atob(d.content)))).comments||[];
     })
     .catch(function(){return[]});
 }
